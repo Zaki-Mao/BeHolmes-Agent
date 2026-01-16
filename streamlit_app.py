@@ -39,15 +39,11 @@ except Exception as e:
     st.stop()
 
 # ================= 📡 3. 数据层：Polymarket 智能抓取 (V4.0 修正版) =================
-
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
     """
-    V4.0 修正逻辑:
-    1. limit=100 (恢复完整监控)
-    2. 严格排除 closed=True 的过期合约，解决 'Price: 0.0%' 问题
+    V4.0 修正逻辑: limit=100, 排除 closed, 修复 0.0%
     """
-    # 🔴 关键修正1: limit=100
     url = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&sort=volume"
     try:
         headers = {
@@ -66,16 +62,12 @@ def fetch_top_markets():
                 if not all_markets:
                     continue
 
-                # 🌟 核心修复逻辑：寻找“正在交易”的主力合约
                 best_market = None
                 max_volume = -1
                 
                 for m in all_markets:
-                    # 🔴 关键修正2: 跳过已关闭(Closed)的子市场
-                    # 很多 0.0% 的原因就是因为抓到了已过期的旧合约
                     if m.get('closed') is True:
-                        continue
-                        
+                        continue   
                     try:
                         vol = float(m.get('volume', 0))
                         if vol > max_volume:
@@ -84,11 +76,9 @@ def fetch_top_markets():
                     except:
                         continue
                 
-                # 兜底：如果所有子市场都关了（不太可能），才勉强取第一个
                 if not best_market:
                     best_market = all_markets[0]
 
-                # 解析价格
                 price_str = "N/A"
                 try:
                     raw_prices = best_market.get('outcomePrices', [])
@@ -99,10 +89,8 @@ def fetch_top_markets():
                     
                     if prices and len(prices) > 0:
                         val = float(prices[0])
-                        
-                        # 格式化显示
                         if val == 0:
-                            price_str = "0.0%" # 真实为0
+                            price_str = "0.0%" 
                         elif val < 0.01:
                             price_str = "<1%"
                         else:
@@ -120,36 +108,39 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Gemini 2.5 引擎 =================
+# ================= 🧠 4. 智能层：Gemini 2.5 操盘手引擎 (Pro Trader Mode) =================
 
 def ignite_prometheus(user_news, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 截取前 40 个最热市场发给 AI (Token 优化)
-        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Price: {m['price']})" for i, m in enumerate(market_list[:40])])
+        markets_text = "\n".join([f"- ID:{i} | {m['title']} (当前赔率: {m['price']})" for i, m in enumerate(market_list[:40])])
         
+        # 🔥 PROMPT 核心重构：从“分析师”转变为“交易员”
         prompt = f"""
-        角色: Prometheus (Polymarket Alpha Hunter).
-        任务: 分析【新闻】，从【市场列表】中寻找交易机会。
+        角色设定: 你是 Prometheus，一个冷酷、以结果为导向的 Polymarket 资深交易员。你不需要讲宏观大道理，你只关心【赔率错配】和【短期爆发力】。
+        
+        任务目标: 分析【新闻情报】，从【市场列表】中寻找具有高盈亏比的交易机会。
 
-        [Top Markets]:
+        [实时市场列表]:
         {markets_text}
 
-        [News]:
+        [突发新闻情报]:
         "{user_news}"
 
-        要求:
-        1. 必须用中文输出。
-        2. 挑选 3 个最相关的市场。
-        3. 解释二阶因果逻辑 (Second-order thinking)。
-        4. 给出 Signal (Long/Short).
+        分析要求 (严格执行):
+        1. **拒绝空话:** 不要说“利好行业”这种废话。必须给出新闻与具体合约之间的【硬逻辑】。如果关联度低，直接忽略。
+        2. **时间维度:** 明确这是一个【短线消息面博弈】(News Spike) 还是 【长线基本面改变】(Fundamental Shift)。
+        3. **出场策略:** 告诉用户什么时候卖。是“吃一波涨幅就跑”还是“拿到结果公布”。
+        4. **只选最强:** 只输出 2-3 个最相关的市场。
 
-        输出格式(Markdown):
-        ### 市场英文标题
-        - **信号:** 🟢 买入 (Yes) / 🔴 卖出 (No)
-        - **逻辑:** (中文深度分析...)
+        输出格式 (Markdown):
+        ### [ID] 市场英文标题
+        - **交易信号:** 🟢 买入 (Yes) / 🔴 卖出 (No) | **置信度:** [0-100%]
+        - **核心逻辑:** (用中文，一针见血地指出为什么新闻会改变这个合约的概率。不要超过3句话。)
+        - **交易计划:** - ⏳ **持仓周期:** [例如: 短线/24小时内 / 长线/直到年底]
+            - 🎯 **离场条件:** [例如: 价格上涨 10% 即止盈 / 等待官方公告落地 / 纯粹的情绪炒作，快进快出]
         """
         
         response = model.generate_content(prompt)
@@ -172,9 +163,7 @@ with st.sidebar:
         top_markets = fetch_top_markets()
     
     if top_markets:
-        # 显示实际监控数量
         st.info(f"已连接: 监控 {len(top_markets)} 个热门市场")
-        # 滚动展示前5个
         for m in top_markets[:5]:
             st.caption(f"📈 {m['title']}")
             st.code(f"Price: {m['price']}")
@@ -188,7 +177,7 @@ st.markdown("---")
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("### 📡 INTELLIGENCE INPUT")
-    user_news = st.text_area("News", height=150, placeholder="输入突发新闻... (例如: OpenAI 发布会推迟)", label_visibility="collapsed")
+    user_news = st.text_area("News", height=150, placeholder="输入情报... (例如: Kraken 宣布因收购案导致现金流紧张)", label_visibility="collapsed")
 
 with col2:
     st.markdown("<br><br>", unsafe_allow_html=True)
