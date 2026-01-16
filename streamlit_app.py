@@ -59,29 +59,41 @@ st.markdown("""
 
 # ================= 📡 3. 数据层：抓取 Polymarket 热门池 =================
 
-@st.cache_data(ttl=300) # 缓存5分钟
+@st.cache_data(ttl=300)
 def fetch_top_markets():
-    """实时抓取 Polymarket 交易量最大的 Top 100 市场"""
-    url = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&sort=volume"
+    """优化版：按流动性抓取，并修复价格显示"""
+    # 🔴 改动1：将 sort=volume 改为 sort=liquidity (流动性越高，市场越健康)
+    url = "https://gamma-api.polymarket.com/events?limit=20&active=true&closed=false&sort=liquidity"
     try:
-        response = requests.get(url, timeout=10) # 增加超时限制
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             data = response.json()
             markets_clean = []
             for event in data:
                 title = event.get('title', 'Unknown')
                 slug = event.get('slug', '')
-                
-                # 获取价格
-                price_str = "N/A"
                 markets = event.get('markets', [])
+                
+                # 🔴 改动2：更严谨的价格获取逻辑
+                price_str = "N/A"
                 if markets:
+                    main_market = markets[0] # 取主市场
                     try:
-                        if 'outcomePrices' in markets[0]:
-                            prices = json.loads(markets[0]['outcomePrices'])
-                            # 取第一个选项的价格 (通常是 Yes)
-                            price_str = f"{float(prices[0]) * 100:.1f}%"
-                    except: pass
+                        if 'outcomePrices' in main_market:
+                            prices = json.loads(main_market['outcomePrices'])
+                            # 获取 "Yes" 的价格 (通常是索引0或1，这里取第一个非零的，或者默认取第一个)
+                            raw_price = float(prices[0])
+                            
+                            # 如果价格太小（比如 0.001），保留两位小数显示，避免变成 0.0%
+                            if raw_price < 0.01 and raw_price > 0:
+                                price_str = f"{raw_price * 100:.2f}%" 
+                            else:
+                                price_str = f"{raw_price * 100:.1f}%"
+                    except: 
+                        price_str = "N/A"
                 
                 markets_clean.append({
                     "title": title,
@@ -92,7 +104,6 @@ def fetch_top_markets():
         return []
     except Exception as e:
         return []
-
 # ================= 🧠 4. 智能层：Gemini 2.5 语义推理引擎 =================
 
 def ignite_prometheus(user_news, market_list, api_key):
@@ -215,4 +226,5 @@ if ignite_btn:
                     🚀 EXECUTE ON POLYMARKET (前往交易)
                 </button>
             </a>
+
             """, unsafe_allow_html=True)
