@@ -38,13 +38,16 @@ except Exception as e:
     st.error(f"⚠️ SYSTEM ERROR: {e}")
     st.stop()
 
-# ================= 📡 3. 数据层：抓取 Polymarket (修复版) =================
+# ================= 📡 3. 数据层：Polymarket 智能抓取 (V3.0) =================
 
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
-    """最终修复版：恢复Top100，按交易量排序，增强价格解析"""
-    # 🔴 改回 limit=100 和 sort=volume (交易量大的市场价格波动才精彩)
-    url = "https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&sort=volume"
+    """
+    终极修复版 V3.0: 
+    1. 遍历 Event 下的所有 Market，找出成交量最大的那个 '主力合约'。
+    2. 解决 0.0% 问题。
+    """
+    url = "https://gamma-api.polymarket.com/events?limit=50&active=true&closed=false&sort=volume"
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -53,38 +56,60 @@ def fetch_top_markets():
         if response.status_code == 200:
             data = response.json()
             markets_clean = []
+            
             for event in data:
                 title = event.get('title', 'Unknown')
                 slug = event.get('slug', '')
-                markets = event.get('markets', [])
+                all_markets = event.get('markets', [])
                 
-                # 🔴 价格解析逻辑增强：兼容不同数据格式
-                price_str = "N/A"
-                if markets:
-                    main_market = markets[0]
+                if not all_markets:
+                    continue
+
+                # 🌟 核心修复逻辑：寻找“主力合约”
+                # 很多 Event 包含多个 Market，我们要找 volume 最大的那个，而不是默认第一个
+                best_market = None
+                max_volume = -1
+                
+                for m in all_markets:
                     try:
-                        # 1. 尝试获取 Outcome Prices
-                        raw_prices = main_market.get('outcomePrices', [])
+                        # 尝试获取该 market 的 volume，如果没有则默认为 0
+                        vol = float(m.get('volume', 0))
+                        if vol > max_volume:
+                            max_volume = vol
+                            best_market = m
+                    except:
+                        continue
+                
+                # 如果没找到 volume 信息，就兜底用第一个
+                if not best_market:
+                    best_market = all_markets[0]
+
+                # 解析价格
+                price_str = "N/A"
+                try:
+                    # 获取 outcomePrices (可能是字符串或列表)
+                    raw_prices = best_market.get('outcomePrices', [])
+                    if isinstance(raw_prices, str):
+                        prices = json.loads(raw_prices)
+                    else:
+                        prices = raw_prices
+                    
+                    # 取第一个非零价格，或者默认取第一个
+                    if prices and len(prices) > 0:
+                        val = float(prices[0])
+                        # 如果是 binary (Yes/No)，通常我们想看 Yes 的价格
+                        # 有些市场 index 0 是 Yes，有些是 No。简单起见，我们展示最大的那个概率（代表胜率较高的一方）
+                        # 或者为了直观，直接展示 val
                         
-                        # 2. 如果是字符串(旧API格式)，转成列表；如果是列表(新API格式)，直接用
-                        if isinstance(raw_prices, str):
-                            prices = json.loads(raw_prices)
+                        # 格式化：去除 0.0% 的尴尬情况
+                        if val == 0:
+                            price_str = "Wait..." # 还没开盘或流动性极差
+                        elif val < 0.01:
+                            price_str = "<1%"
                         else:
-                            prices = raw_prices
-                        
-                        # 3. 尝试找到 "Yes" 的价格
-                        # 大多数二元市场，索引 0 或 1 是 Yes。通常取最大的那个或者第一个非零的作为展示
-                        if prices and len(prices) > 0:
-                            # 简单策略：取第一个价格 (通常是 Yes 或主要选项)
-                            val = float(prices[0])
-                            
-                            # 格式化
-                            if val < 0.01 and val > 0:
-                                price_str = f"{val * 100:.2f}%"
-                            else:
-                                price_str = f"{val * 100:.1f}%"
-                    except Exception as e: 
-                        price_str = "N/A"
+                            price_str = f"{val * 100:.1f}%"
+                except:
+                    price_str = "N/A"
                 
                 markets_clean.append({
                     "title": title,
@@ -94,6 +119,7 @@ def fetch_top_markets():
             return markets_clean
         return []
     except Exception as e:
+        print(f"Error: {e}")
         return []
 
 # ================= 🧠 4. 智能层：Gemini 2.5 引擎 =================
@@ -103,8 +129,8 @@ def ignite_prometheus(user_news, market_list, key):
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 只取前 50 个市场给 AI，避免 Token 过多溢出
-        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Price: {m['price']})" for i, m in enumerate(market_list[:50])])
+        # 截取前 30 个给 AI，保证速度
+        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Price: {m['price']})" for i, m in enumerate(market_list[:30])])
         
         prompt = f"""
         角色: Prometheus (Polymarket Alpha Hunter).
@@ -144,13 +170,13 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🔥 Top Market Monitor")
     
-    with st.spinner("Syncing Polymarket..."):
+    with st.spinner("Syncing Polymarket Data..."):
         top_markets = fetch_top_markets()
     
     if top_markets:
         st.info(f"已连接: 监控 {len(top_markets)} 个热门市场")
-        # 滚动展示前3个
-        for m in top_markets[:3]:
+        # 滚动展示前5个，方便你确认价格是否修复
+        for m in top_markets[:5]:
             st.caption(f"📈 {m['title']}")
             st.code(f"Price: {m['price']}")
     else:
