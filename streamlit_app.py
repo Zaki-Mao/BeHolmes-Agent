@@ -152,7 +152,7 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Be Holmes 深度推理引擎 (V5.0 Live Ticker) =================
+# ================= 🧠 4. 智能层：Be Holmes 深度推理引擎 (V5.1 LED Ticker Style) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
@@ -164,8 +164,7 @@ def consult_holmes(user_evidence, market_list, key):
         
         prompt = f"""
         Role: You are **Be Holmes**, a legendary prediction market detective. 
-        Your goal is to find Alpha by connecting news to market mispricing.
-
+        
         Task: Analyze the [Evidence] against the [Market List].
 
         [Evidence]: "{user_evidence}"
@@ -175,25 +174,25 @@ def consult_holmes(user_evidence, market_list, key):
         - Input Chinese -> Output CHINESE report.
         - Input English -> Output ENGLISH report.
 
-        **ANALYSIS REQUIREMENTS:**
-        1. **Deep Logic:** Write a comprehensive paragraph (100+ words) for the "Deduction" section. Explain the causal mechanism.
-        2. **Real-time Ticker:** You MUST display the current odds (Yes/No) clearly in the report header.
-
-        **OUTPUT FORMAT (Markdown Cards):**
+        **OUTPUT FORMAT (Markdown + HTML):**
+        
+        You must structure the output strictly as follows. 
+        For the "Market Ticker", just provide the raw odds string, I will format it.
 
         ---
         ### 🕵️‍♂️ Case File: [Exact Market Title]
         
-        **📊 Market Ticker (实时盘口)**
-        > **[Insert Real-time Odds Here]** (e.g., "Yes: 22.5% | No: 77.5%")
+        <div class="ticker-box">
+        📡 LIVE SNAPSHOT: [Insert Odds Here, e.g., Yes: 22.5% | No: 77.5%]
+        </div>
         
         **1. ⚖️ The Verdict (结论)**
         - **Signal:** 🟢 STRONG BUY / 🔴 STRONG SELL / ⚠️ WATCH
         - **Confidence:** **[0-100]%**
-        - **Target:** Market is roughly [Current %], I predict [Your %].
+        - **Target:** Market [Current %] ➔ I Predict [Target %]
         
         **2. ⛓️ The Deduction (深度逻辑链)**
-        > *[Mandatory: Detailed analysis paragraph. Start with facts, explain the impact on settlement rules, and conclude why the price is wrong.]*
+        > *[Mandatory: Detailed analysis paragraph (100+ words). Explain the causal chain clearly.]*
         
         **3. ⏳ Execution (执行计划)**
         - **Timeframe:** [Duration]
@@ -203,14 +202,31 @@ def consult_holmes(user_evidence, market_list, key):
         
         response = model.generate_content(prompt)
         
-        # V5.0: 保持顶格无缩进的 HTML 按钮
-        btn_html = """
+        # 注入 LED 样式和 底部按钮
+        # 这里的 CSS .ticker-box 就是控制那个框样子的
+        custom_html = """
+<style>
+.ticker-box {
+    background-color: #000;
+    border: 1px solid #333;
+    border-left: 5px solid #D4AF37; /* 金色左边框 */
+    color: #00FF00; /* 骇客绿数字 */
+    font-family: 'Courier New', monospace;
+    padding: 15px;
+    margin: 10px 0;
+    font-size: 1.1em;
+    font-weight: bold;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.1);
+    letter-spacing: 1px;
+}
+</style>
+
 <br>
 <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
 <button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
 </a>
 """
-        return response.text + btn_html
+        return response.text + custom_html
 
     except Exception as e:
         return f"❌ Deduction Error: {str(e)}"
@@ -266,3 +282,4 @@ if ignite_btn:
             st.markdown("---")
             st.markdown("### 📝 INVESTIGATION REPORT")
             st.markdown(result, unsafe_allow_html=True)
+
