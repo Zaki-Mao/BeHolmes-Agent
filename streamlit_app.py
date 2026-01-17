@@ -139,48 +139,47 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Be Holmes 演绎引擎 =================
+# ================= 🧠 4. 智能层：Be Holmes 演绎引擎 (V2.0 严格式版) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Current Odds: {m['price']})" for i, m in enumerate(market_list[:50])])
+        # 限制只把前 40 个最热门的市场发给 AI，节省 Token 并提高聚焦度
+        markets_text = "\n".join([f"- ID:{i} | {m['title']} (Current Odds: {m['price']})" for i, m in enumerate(market_list[:40])])
         
-        # 🔥 PROMPT 核心重构：福尔摩斯风格 + 中英文自适应
         prompt = f"""
-        Role: You are **Be Holmes**, the Sherlock Holmes of prediction markets. 
-        You use "Second-Order Causal Reasoning" to deduce the future impact of news on market probabilities.
-        You are sharp, analytical, and cut through the noise.
+        Role: You are **Be Holmes**, an AI detective for prediction markets. 
+        You rely on strict logic and probability, not emotion.
 
-        Task: Analyze the [Evidence] against the [Market List] to find hidden opportunities.
+        Task: Analyze the [Evidence] to find trading opportunities in the [Market List].
 
         [Real-time Market List]:
         {markets_text}
 
-        [Evidence / News]:
+        [Evidence]:
         "{user_evidence}"
 
-        **CRITICAL INSTRUCTION ON LANGUAGE:**
-        - **If the [Evidence] is in Chinese:** You MUST reply entirely in **Chinese**.
-        - **If the [Evidence] is in English:** You MUST reply entirely in **English**.
-        - Detect the language automatically.
+        **LANGUAGE PROTOCOL:**
+        - If evidence is Chinese -> Output CHINESE.
+        - If evidence is English -> Output ENGLISH.
 
-        Analysis Requirements:
-        1. **The Deduction:** Don't just summarize. Explain the chain of causality. Why does X lead to Y?
-        2. **The Verdict:** Identify 1-3 specific markets that are mispriced based on this news.
-        3. **The Trap:** Warn the user if this is just "noise" or a "trap" (market already priced in).
+        **OUTPUT FORMAT RULES (STRICTLY ENFORCE):**
+        1. **NO INTRO/OUTRO:** Do not say "My dear Watson" or "Here is the report". Start directly with the Case File.
+        2. **SEPARATE CASES:** If multiple markets are relevant, create a separate "Case File" block for EACH one. **DO NOT merge them.**
+        3. **LIMIT:** Output max 3 most relevant markets.
 
-        **Output Format (Strict Markdown):**
+        **REQUIRED MARKDOWN TEMPLATE:**
 
-        ### 🕵️‍♂️ Case File: [Market Name]
-        - **Signal:** 🟢 Buy Yes / 🔴 Buy No / ⚠️ Watch
-        - **Probability Delta:** [Current %] -> [Predicted %]
-        - **The Logic:** (Explain the deduction clearly here. Keep it concise.)
-        - **Plan:** (Short-term entry or Long-term hold?)
+        ### 🕵️‍♂️ Case File: [Exact Market Title]
+        - **Signal:** 🟢 Buy YES / 🔴 Buy NO / ⚠️ Watch
+        - **Win Probability:** [Your Predicted %] (vs Market: [Current %])
+        - **The Deduction:** [One sentence explaining the direct causal link.]
+        - **The Trap:** [What could go wrong? e.g., "Market already priced in", "Ambiguous wording"]
+        - **Plan:** [Short-term flip / Long-term hold]
 
-        (If no relevant markets are found, state: "My investigation yields no connection to current active markets.")
+        ---
         """
         
         response = model.generate_content(prompt)
@@ -188,7 +187,7 @@ def consult_holmes(user_evidence, market_list, key):
 
     except Exception as e:
         return f"❌ Deduction Error: {str(e)}"
-
+        
 # ================= 🖥️ 5. 前端交互层 (UI Upgrade) =================
 
 with st.sidebar:
@@ -247,3 +246,4 @@ if ignite_btn:
             st.markdown(result)
             # 底部按钮链接
             st.markdown("<br><a href='https://polymarket.com/' target='_blank'><button style='background:transparent;border:1px solid #D4AF37;color:#D4AF37;width:100%;padding:10px;font-family:monospace;cursor:pointer;'>🚀 EXECUTE TRADE</button></a>", unsafe_allow_html=True)
+
