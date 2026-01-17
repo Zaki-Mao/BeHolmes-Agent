@@ -139,46 +139,57 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Be Holmes 演绎引擎 (V2.0 严格式版) =================
+# ================= 🧠 4. 智能层：Be Holmes 深度推理引擎 (V3.0 Hardcore Mode) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 限制只把前 40 个最热门的市场发给 AI，节省 Token 并提高聚焦度
+        # 限制市场数量，确保 AI 聚焦
         markets_text = "\n".join([f"- ID:{i} | {m['title']} (Current Odds: {m['price']})" for i, m in enumerate(market_list[:40])])
         
         prompt = f"""
-        Role: You are **Be Holmes**, an AI detective for prediction markets. 
-        You rely on strict logic and probability, not emotion.
+        Role: You are **Be Holmes**, a ruthless prediction market strategist. 
+        You DO NOT write stories. You output **structured, actionable trading intelligence**.
 
-        Task: Analyze the [Evidence] to find trading opportunities in the [Market List].
+        Task: Analyze the [Evidence] against the [Market List]. Find Alpha.
 
-        [Real-time Market List]:
-        {markets_text}
-
-        [Evidence]:
+        [Evidence / Lead]:
         "{user_evidence}"
 
-        **LANGUAGE PROTOCOL:**
-        - If evidence is Chinese -> Output CHINESE.
-        - If evidence is English -> Output ENGLISH.
+        [Market Data]:
+        {markets_text}
 
-        **OUTPUT FORMAT RULES (STRICTLY ENFORCE):**
-        1. **NO INTRO/OUTRO:** Do not say "My dear Watson" or "Here is the report". Start directly with the Case File.
-        2. **SEPARATE CASES:** If multiple markets are relevant, create a separate "Case File" block for EACH one. **DO NOT merge them.**
-        3. **LIMIT:** Output max 3 most relevant markets.
+        **LANGUAGE PROTOCOL (STRICT):**
+        - If input is Chinese -> Output CHINESE.
+        - If input is English -> Output ENGLISH.
 
-        **REQUIRED MARKDOWN TEMPLATE:**
+        **ANALYSIS FRAMEWORK (The "Sherlock" Method):**
+        For each relevant market, you must perform a "Causal Chain Analysis":
+        1. **Signal Extraction:** What exactly is the news?
+        2. **Transmission Mechanism:** How does this specific news affect the settlement criteria of the market?
+        3. **Probability Calibration:** Why is the current market price wrong?
 
+        **OUTPUT FORMAT (Markdown Cards):**
+        Output 1 to 3 "Investigation Cards". Do not merge them. Do not add intro/outro text.
+
+        ---
         ### 🕵️‍♂️ Case File: [Exact Market Title]
-        - **Signal:** 🟢 Buy YES / 🔴 Buy NO / ⚠️ Watch
-        - **Win Probability:** [Your Predicted %] (vs Market: [Current %])
-        - **The Deduction:** [One sentence explaining the direct causal link.]
-        - **The Trap:** [What could go wrong? e.g., "Market already priced in", "Ambiguous wording"]
-        - **Plan:** [Short-term flip / Long-term hold]
-
+        
+        **1. 📊 The Verdict (结论)**
+        - **Action:** 🟢 BUY YES / 🔴 BUY NO / ⚠️ WATCH (Select one)
+        - **Confidence Score:** [0-100%] (How sure are you?)
+        - **Odds Delta:** Market [Current %] ➔ Target [Your Predicted %]
+        
+        **2. ⛓️ Causal Logic (深度逻辑链)**
+        * **Step 1 (Fact):** [Briefly state the hard evidence]
+        * **Step 2 (Inference):** [Explain the direct impact on the event's outcome]
+        * **Step 3 (Conclusion):** [Why the market is mispriced right now]
+        
+        **3. ⏳ Execution Plan (交易计划)**
+        - **Timeframe:** [Specific duration, e.g., "Intraday / 24 Hours" or "Hold until official filing"]
+        - **Exit Condition:** [When to sell? e.g., "Take profit at 60%" or "Sell immediately if news is denied"]
         ---
         """
         
@@ -246,4 +257,5 @@ if ignite_btn:
             st.markdown(result)
             # 底部按钮链接
             st.markdown("<br><a href='https://polymarket.com/' target='_blank'><button style='background:transparent;border:1px solid #D4AF37;color:#D4AF37;width:100%;padding:10px;font-family:monospace;cursor:pointer;'>🚀 EXECUTE TRADE</button></a>", unsafe_allow_html=True)
+
 
