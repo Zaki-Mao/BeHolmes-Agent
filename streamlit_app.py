@@ -4,57 +4,67 @@ import json
 import google.generativeai as genai
 import os
 
-# ================= 🕵️‍♂️ 1. 基础配置 (侦探事务所风格) =================
+# ================= 🕵️‍♂️ 1. 基础配置 (Be Holmes 终极版) =================
 st.set_page_config(
     page_title="Be Holmes | AI Market Detective",
-    page_icon="🕵️‍♂️",  # 侦探图标
+    page_icon="🕵️‍♂️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 注入 CSS：英伦侦探暗黑风格 (Gold & Charcoal)
+# 注入 CSS：英伦侦探暗黑风格 (Gold & Charcoal) - V4.0 UI 修复版
 st.markdown("""
 <style>
-    /* 全局背景：深灰黑色，比纯黑更有质感 */
+    /* 全局背景 */
     .stApp { background-color: #0E1117; font-family: 'Roboto Mono', monospace; }
     
-    /* 侧边栏：更深的灰 */
+    /* 侧边栏 */
     [data-testid="stSidebar"] { background-color: #050505; border-right: 1px solid #333; }
     
-    /* 标题 H1: 侦探金 */
+    /* 标题 H1 */
     h1 { color: #D4AF37 !important; font-family: 'Georgia', serif; text-shadow: 0 0 5px #443300; border-bottom: 1px solid #D4AF37; padding-bottom: 15px;}
     
-    /* 副标题 & 普通文本 */
+    /* 副标题 & 文本 */
     h3 { color: #E0C097 !important; }
     p, label, .stMarkdown, .stText, li, div { color: #B0B0B0 !important; }
-    
-    /* 强调文字 */
     strong { color: #FFF !important; font-weight: 600; } 
     
-    /* 输入框 */
-    .stTextArea textarea { background-color: #1A1A1A; color: #D4AF37; border: 1px solid #555; font-family: 'Courier New', monospace; }
-    .stTextArea textarea:focus { border: 1px solid #D4AF37; box-shadow: 0 0 5px #D4AF37; }
+    /* 输入框优化 */
+    .stTextArea textarea { background-color: #151515; color: #D4AF37; border: 1px solid #444; }
+    .stTextArea textarea:focus { border: 1px solid #D4AF37; box-shadow: 0 0 10px rgba(212, 175, 55, 0.2); }
     
-    /* 按钮：金色边框，悬停变金 */
+    /* 按钮样式优化 (Investigations 按钮) */
     div.stButton > button { 
-        background-color: #000; 
-        color: #D4AF37; 
-        border: 1px solid #D4AF37; 
-        font-weight: bold; 
-        letter-spacing: 2px;
+        background-color: #000; color: #D4AF37; border: 1px solid #D4AF37; 
         transition: all 0.3s ease;
     }
     div.stButton > button:hover { 
-        background-color: #D4AF37; 
-        color: #000; 
-        border-color: #FFF;
+        background-color: #D4AF37; color: #000; border-color: #D4AF37;
     }
     
-    /* 代码块/数据展示 */
-    .stCode { background-color: #111 !important; border-left: 3px solid #D4AF37; }
+    /* 去掉链接下划线 */
+    a { text-decoration: none !important; border-bottom: none !important; }
     
-    /* 链接 */
-    a { color: #D4AF37 !important; text-decoration: none; border-bottom: 1px dotted #D4AF37; }
+    /* 底部执行按钮专属样式 (V4.0 新增) */
+    .execute-btn {
+        background: linear-gradient(45deg, #D4AF37, #FFD700); /* 渐变金 */
+        border: none;
+        color: #000; /* 黑色文字 */
+        width: 100%;
+        padding: 15px;
+        font-weight: 800; /* 极粗 */
+        font-size: 16px;
+        cursor: pointer;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3);
+        margin-top: 20px;
+    }
+    .execute-btn:hover { 
+        transform: translateY(-2px); 
+        box-shadow: 0 6px 20px rgba(212, 175, 55, 0.6); 
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,7 +79,7 @@ except Exception as e:
     st.error(f"⚠️ SYSTEM ERROR: {e}")
     st.stop()
 
-# ================= 📡 3. 数据层：Polymarket (保持 V4.0 逻辑) =================
+# ================= 📡 3. 数据层：Polymarket (V4.0 稳定版) =================
 @st.cache_data(ttl=300) 
 def fetch_top_markets():
     """
@@ -139,74 +149,74 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Be Holmes 深度推理引擎 (V3.0 Hardcore Mode) =================
+# ================= 🧠 4. 智能层：Be Holmes 深度长文推理引擎 (V4.0 Deep Dive) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 限制市场数量，确保 AI 聚焦
+        # 限制市场数量
         markets_text = "\n".join([f"- ID:{i} | {m['title']} (Current Odds: {m['price']})" for i, m in enumerate(market_list[:40])])
         
         prompt = f"""
-        Role: You are **Be Holmes**, a ruthless prediction market strategist. 
-        You DO NOT write stories. You output **structured, actionable trading intelligence**.
+        Role: You are **Be Holmes**, a legendary prediction market detective. 
+        Your clients pay you for **deep, comprehensive, and exhaustive analysis**, not quick summaries.
+        You must write detailed logical deductions that reveal the "Why" behind the probability.
 
-        Task: Analyze the [Evidence] against the [Market List]. Find Alpha.
+        Task: Analyze the [Evidence] against the [Market List] to find Alpha.
 
-        [Evidence / Lead]:
-        "{user_evidence}"
+        [Evidence]: "{user_evidence}"
+        [Market Data]: {markets_text}
 
-        [Market Data]:
-        {markets_text}
+        **LANGUAGE PROTOCOL:**
+        - Input Chinese -> Output CHINESE (Traditional/Simplified based on input).
+        - Input English -> Output ENGLISH.
 
-        **LANGUAGE PROTOCOL (STRICT):**
-        - If input is Chinese -> Output CHINESE.
-        - If input is English -> Output ENGLISH.
-
-        **ANALYSIS FRAMEWORK (The "Sherlock" Method):**
-        For each relevant market, you must perform a "Causal Chain Analysis":
-        1. **Signal Extraction:** What exactly is the news?
-        2. **Transmission Mechanism:** How does this specific news affect the settlement criteria of the market?
-        3. **Probability Calibration:** Why is the current market price wrong?
+        **ANALYSIS REQUIREMENTS (DEEP DIVE):**
+        1. **Go Deep:** Do not be brief. For the "Logic" section, write a comprehensive paragraph (approx 100-150 words) explaining the causal chain.
+        2. **Connect the Dots:** Explicitly link the specific keywords in the news to the specific settlement rules of the market.
+        3. **No Footer:** Do not output any conversational text like "My investigation found..." at the end. Only output the Cards.
 
         **OUTPUT FORMAT (Markdown Cards):**
-        Output 1 to 3 "Investigation Cards". Do not merge them. Do not add intro/outro text.
 
         ---
         ### 🕵️‍♂️ Case File: [Exact Market Title]
         
         **1. 📊 The Verdict (结论)**
-        - **Action:** 🟢 BUY YES / 🔴 BUY NO / ⚠️ WATCH (Select one)
-        - **Confidence Score:** [0-100%] (How sure are you?)
-        - **Odds Delta:** Market [Current %] ➔ Target [Your Predicted %]
+        - **Signal:** 🟢 STRONG BUY / 🔴 STRONG SELL / ⚠️ WAIT
+        - **Confidence:** **[0-100]%** (Explain briefly why)
+        - **Odds Gap:** Market [Current %] ➔ Target [Your Predicted %]
         
-        **2. ⛓️ Causal Logic (深度逻辑链)**
-        * **Step 1 (Fact):** [Briefly state the hard evidence]
-        * **Step 2 (Inference):** [Explain the direct impact on the event's outcome]
-        * **Step 3 (Conclusion):** [Why the market is mispriced right now]
+        **2. ⛓️ The Deduction (深度逻辑链)**
+        > *[Mandatory: Write a detailed analytical paragraph here. Start with the raw evidence, then explain the transmission mechanism (how this affects voter/market psychology), and finally conclude why the current price is wrong. Be thorough and professional.]*
         
-        **3. ⏳ Execution Plan (交易计划)**
-        - **Timeframe:** [Specific duration, e.g., "Intraday / 24 Hours" or "Hold until official filing"]
-        - **Exit Condition:** [When to sell? e.g., "Take profit at 60%" or "Sell immediately if news is denied"]
+        **3. ⏳ Execution (执行计划)**
+        - **Timeframe:** [e.g., "Hold for 48h" / "Long term until Q3"]
+        - **Exit Strategy:** [e.g., "Sell if odds hit 60%" or "Stop loss if official denial is issued"]
         ---
         """
         
         response = model.generate_content(prompt)
-        return response.text
+        
+        # 返回结果 + 修复后的实心金色按钮
+        final_output = response.text + """
+        <br>
+        <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
+            <button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
+        </a>
+        """
+        return final_output
 
     except Exception as e:
         return f"❌ Deduction Error: {str(e)}"
-        
-# ================= 🖥️ 5. 前端交互层 (UI Upgrade) =================
+
+# ================= 🖥️ 5. 前端交互层 (UI V4.0) =================
 
 with st.sidebar:
-    # 使用 Streamlit 专属 Logo (可选)
-    # st.image("logo.png") 
-    
+    # 侧边栏
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
-    st.markdown("`ENGINE: GEMINI-2.5`")
+    st.markdown("`ENGINE: GEMINI-2.5-FLASH`")
     st.success("🔒 Authorization: Granted")
     
     st.markdown("---")
@@ -225,23 +235,23 @@ with st.sidebar:
 
 # 主标题区
 st.title("🕵️‍♂️ Be Holmes")
-st.caption("THE ART OF DEDUCTION FOR PREDICTION MARKETS") 
+st.caption("THE ART OF DEDUCTION FOR PREDICTION MARKETS | DEEP CAUSAL INFERENCE") 
 st.markdown("---")
 
 col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("### 📁 EVIDENCE LOCKER")
-    # 输入框提示词
+    # 输入框
     user_news = st.text_area(
         "News", 
         height=150, 
-        placeholder="Enter the news or rumor here... \n(Input English for English response, Chinese for Chinese response)", 
+        placeholder="Enter evidence here... \n(Input English -> English Report | Input Chinese -> Chinese Report)", 
         label_visibility="collapsed"
     )
 
 with col2:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    # 按钮文案变更
+    # 调查按钮
     ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
 
 if ignite_btn:
@@ -250,12 +260,9 @@ if ignite_btn:
     elif not top_markets:
         st.error("⚠️ Market data unavailable.")
     else:
-        with st.spinner(">> Deducing outcomes..."):
+        with st.spinner(">> Deducing outcomes... (Deep Analysis)"):
             result = consult_holmes(user_news, top_markets, api_key)
             st.markdown("---")
             st.markdown("### 📝 INVESTIGATION REPORT")
-            st.markdown(result)
-            # 底部按钮链接
-            st.markdown("<br><a href='https://polymarket.com/' target='_blank'><button style='background:transparent;border:1px solid #D4AF37;color:#D4AF37;width:100%;padding:10px;font-family:monospace;cursor:pointer;'>🚀 EXECUTE TRADE</button></a>", unsafe_allow_html=True)
-
-
+            # 渲染结果（允许 HTML 以显示自定义按钮）
+            st.markdown(result, unsafe_allow_html=True)
