@@ -149,7 +149,7 @@ def fetch_top_markets():
     except Exception as e:
         return []
 
-# ================= 🧠 4. 智能层：Be Holmes 深度长文推理引擎 (V4.0 Deep Dive) =================
+# ================= 🧠 4. 智能层：Be Holmes 深度长文推理引擎 (V4.1 修复版) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
@@ -199,14 +199,14 @@ def consult_holmes(user_evidence, market_list, key):
         
         response = model.generate_content(prompt)
         
-        # 返回结果 + 修复后的实心金色按钮
-        final_output = response.text + """
-        <br>
-        <a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
-            <button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
-        </a>
-        """
-        return final_output
+        # 修复：移除所有缩进，确保顶格书写，防止被识别为代码块
+        btn_html = """
+<br>
+<a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'>
+<button class='execute-btn'>🚀 EXECUTE TRADE ON POLYMARKET</button>
+</a>
+"""
+        return response.text + btn_html
 
     except Exception as e:
         return f"❌ Deduction Error: {str(e)}"
@@ -266,3 +266,4 @@ if ignite_btn:
             st.markdown("### 📝 INVESTIGATION REPORT")
             # 渲染结果（允许 HTML 以显示自定义按钮）
             st.markdown(result, unsafe_allow_html=True)
+
