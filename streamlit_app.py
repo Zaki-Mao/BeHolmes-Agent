@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. UI DESIGN (Magma Red - Clean Mode) =================
+# ================= 🎨 2. UI DESIGN (Magma Red) =================
 st.markdown("""
 <style>
     /* --- HIDE SYSTEM ELEMENTS --- */
@@ -92,20 +92,33 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (HYBRID DUAL-ENGINE V16.0) =================
+# ================= 📡 4. DATA ENGINE (DUAL-TRACK V17.0) =================
 
 def detect_language_type(text):
     for char in text:
         if '\u4e00' <= char <= '\u9fff': return "CHINESE"
     return "ENGLISH"
 
-def parse_single_market(m):
+def normalize_market_object(m, source_type="market"):
+    """
+    统一清洗逻辑：把来自 Event 和 Market 两个不同接口的数据统一格式
+    """
     try:
-        title = m.get('question', m.get('title', 'Unknown Market'))
-        slug = m.get('slug', '')
-        
+        # 排除已关闭的市场 (V17: 本地过滤，而非 API 过滤)
         if m.get('closed') is True: return None
         
+        # 提取标题
+        if source_type == "event":
+            # Event 接口通常包含 markets 列表，我们只取第一个或遍历
+            # 这里假设 m 已经是 Event 里的一个具体 market
+            title = m.get('question', m.get('title', 'Unknown'))
+        else:
+            title = m.get('question', m.get('title', 'Unknown'))
+
+        slug = m.get('slug', '')
+        m_id = m.get('id', '')
+        
+        # 解析赔率
         odds_display = "N/A"
         raw_outcomes = m.get('outcomes', '["Yes", "No"]')
         outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
@@ -117,95 +130,107 @@ def parse_single_market(m):
             for o, p in zip(outcomes, prices):
                 try:
                     val = float(p) * 100
-                    if val > 0.5: odds_list.append(f"{o}: {val:.1f}%")
+                    if val > 0.1: odds_list.append(f"{o}: {val:.1f}%")
                 except: continue
             odds_display = " | ".join(odds_list)
-        elif prices:
-             odds_display = f"Price: {float(prices[0])*100:.1f}%"
-             
-        volume = float(m.get('volume', 0))
         
-        return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
+        # 必须有流动性或成交量
+        volume = float(m.get('volume', 0))
+        liquidity = float(m.get('liquidity', 0))
+        
+        # V17: 放宽过滤条件，有些新市场 volume 低但 liquidity 高
+        if volume < 10 and liquidity < 10: return None 
+        
+        return {
+            "title": title, 
+            "odds": odds_display, 
+            "slug": slug, 
+            "volume": volume, 
+            "liquidity": liquidity,
+            "id": m_id
+        }
     except: return None
 
 @st.cache_data(ttl=300) 
-def fetch_top_markets():
+def fetch_sidebar_markets():
     try:
-        # 获取 Top 50 用于侧边栏显示
-        url = "https://gamma-api.polymarket.com/markets?limit=50&active=true&closed=false&sort=volume"
-        response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=6)
+        url = "https://gamma-api.polymarket.com/markets?limit=20&closed=false&sort=volume"
+        response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
         if response.status_code == 200:
-            raw_data = response.json()
+            raw = response.json()
             cleaned = []
-            for m in raw_data:
-                parsed = parse_single_market(m)
+            for m in raw:
+                parsed = normalize_market_object(m, "market")
                 if parsed: cleaned.append(parsed)
             return cleaned
         return []
     except: return []
 
-@st.cache_data(ttl=60) # 缓存时间短一点，保证新鲜
-def fetch_all_active_markets():
+def dual_track_search(keywords):
     """
-    🔥 引擎 A：全量大盘扫描
-    一次性拉取 Volume 最大的 500 个市场到本地内存。
-    这比依赖 API 的 'q=' 搜索靠谱得多。
-    """
-    try:
-        # limit=500 是关键，确保 SpaceX IPO 这种 800k volume 的市场一定在里面
-        url = "https://gamma-api.polymarket.com/markets?limit=500&active=true&closed=false&sort=volume"
-        response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=10)
-        if response.status_code == 200:
-            raw_data = response.json()
-            cleaned = []
-            for m in raw_data:
-                parsed = parse_single_market(m)
-                if parsed: cleaned.append(parsed)
-            return cleaned
-        return []
-    except: return []
-
-def hybrid_search(keywords_list):
-    """
-    🔥 V16 混合搜索逻辑：
-    1. 先从本地 500 个热门市场里进行 Python 字符串匹配（最准）。
-    2. 如果没找到，再退回到 API 关键词搜索（查缺补漏）。
+    🔥 V17 核心：双轨搜索
+    同时搜 /events 和 /markets 两个接口，确保无死角。
     """
     all_results = []
     seen_ids = set()
     
-    # --- Phase 1: Local Neural Search (从 Top 500 里找) ---
-    # 只要关键词出现在标题里，就抓住它
-    big_data = fetch_all_active_markets()
-    
-    for m in big_data:
-        # 只要任意一个关键词命中标题，就算匹配
-        for kw in keywords_list:
-            if kw.lower() in m['title'].lower():
-                if m['id'] not in seen_ids:
-                    all_results.append(m)
-                    seen_ids.add(m['id'])
-                break # 命中一个词就不需要继续匹配其他词了
-
-    # --- Phase 2: API Fallback (如果本地没找到，再去问 API) ---
-    if len(all_results) < 5:
-        for kw in keywords_list:
-            if not kw: continue
-            url = f"https://gamma-api.polymarket.com/markets?limit=20&active=true&closed=false&sort=volume&q={kw}"
-            try:
-                response = requests.get(url, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    for m in data:
-                        parsed = parse_single_market(m)
+    for kw in keywords:
+        if not kw: continue
+        
+        # --- Track 1: Search Events (Search Groups) ---
+        # 很多大热门像 SpaceX IPO 其实是一个 Event Group
+        try:
+            url_events = f"https://gamma-api.polymarket.com/events?q={kw}&limit=20"
+            resp_ev = requests.get(url_events, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
+            if resp_ev.status_code == 200:
+                events = resp_ev.json()
+                for ev in events:
+                    # 提取 Event 里面的 markets
+                    markets_in_event = ev.get('markets', [])
+                    for m in markets_in_event:
+                        parsed = normalize_market_object(m, "event")
                         if parsed and parsed['id'] not in seen_ids:
                             all_results.append(parsed)
                             seen_ids.add(parsed['id'])
-            except: continue
+        except: pass
 
-    # 再次按 Volume 排序，确保最热门的排第一
-    all_results.sort(key=lambda x: x['volume'], reverse=True)
-    return all_results
+        # --- Track 2: Search Markets (Direct Contracts) ---
+        # 搜具体的合约标题
+        try:
+            url_mkts = f"https://gamma-api.polymarket.com/markets?q={kw}&limit=50"
+            resp_mk = requests.get(url_mkts, headers={"User-Agent": "BeHolmes/1.0"}, timeout=4)
+            if resp_mk.status_code == 200:
+                markets = resp_mk.json()
+                for m in markets:
+                    parsed = normalize_market_object(m, "market")
+                    if parsed and parsed['id'] not in seen_ids:
+                        all_results.append(parsed)
+                        seen_ids.add(parsed['id'])
+        except: pass
+
+    # --- Phase 3: Reranking ---
+    # 根据相关性排序：如果标题里包含关键词，权重极高；其次看 Volume
+    ranked_results = []
+    search_str = " ".join(keywords).lower()
+    
+    for item in all_results:
+        score = 0
+        title_lower = item['title'].lower()
+        
+        # 包含关键词加分
+        if any(k.lower() in title_lower for k in keywords):
+            score += 100
+        
+        # Volume 加分 (归一化)
+        score += (item['volume'] / 10000) 
+        
+        item['_score'] = score
+        ranked_results.append(item)
+        
+    # 按分数降序
+    ranked_results.sort(key=lambda x: x['_score'], reverse=True)
+    
+    return ranked_results[:30] # 只取前30个最相关的
 
 def extract_search_terms_ai(user_text, key):
     if not user_text: return []
@@ -213,9 +238,9 @@ def extract_search_terms_ai(user_text, key):
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""
-        Extract 2 distinct English search keywords.
-        1. Exact concept (e.g. "SpaceX IPO")
-        2. Broad entity (e.g. "SpaceX")
+        Extract 2 distinct English search keywords for a database.
+        1. Specific Entity+Event (e.g. "SpaceX IPO")
+        2. Broad Entity (e.g. "SpaceX")
         Input: "{user_text}"
         Output: Keyword1, Keyword2 (comma separated)
         """
@@ -232,25 +257,26 @@ def consult_holmes(user_evidence, market_list, key):
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:30]])
+        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list])
         target_language = detect_language_type(user_evidence)
         
         prompt = f"""
         Role: You are **Be Holmes**, a Senior Hedge Fund Strategist.
         
         [User Input]: "{user_evidence}"
-        [Market Data (Filtered Match)]: 
+        [Market Data Scanned]: 
         {markets_text}
 
         **MANDATORY INSTRUCTION:**
         1. **Language:** Output strictly in **{target_language}**.
-        2. **Targeting:** Find the EXACT market. If user asks "SpaceX IPO", do NOT pick "Kraken".
-           - Prioritize markets with higher volume or exact title match.
+        2. **Matching:** Find the market that matches the user's intent. 
+           - If user asks "SpaceX IPO", look for "SpaceX IPO". 
+           - DO NOT Hallucinate. If the specific market is missing from the list above, say "Target market not found" and analyze the closest proxy (like SpaceX general performance).
         
         **OUTPUT FORMAT (Strict Markdown):**
         
         ---
-        ### 🕵️‍♂️ Case File: [Exact Market Question]
+        ### 🕵️‍♂️ Case File: [Exact Market Title]
         
         <div class="ticker-box">
         🔥 LIVE SNAPSHOT: [Insert Odds]
@@ -292,10 +318,8 @@ def open_manual():
         ### 🕵️‍♂️ 系统简介
         **Be Holmes** 是基于 Gemini 2.5 的全知全能金融侦探。
         
-        ### 🚀 V16.0 核心引擎：混合双驱
-        为了解决 API 搜索不准的问题，V16 版本引入了**"全量大盘扫描"**机制。
-        1. **大盘快照：** 系统直接拉取 Polymarket 活跃度最高的 500 个市场到本地内存。
-        2. **神经检索：** 在本地进行毫秒级的 Python 语义匹配，确保如 "SpaceX IPO" 等热门市场**100% 召回**。
+        ### 🚀 V17.0 核心引擎：双轨深潜 (Dual-Track)
+        我们同时接入 Polymarket 的 `/events` (事件组) 和 `/markets` (独立合约) 接口。无论目标市场是被打包在事件集中，还是作为独立合约存在，双轨引擎都能将其召回。
         
         ### 🛠️ 操作指南
         - **输入:** 粘贴新闻或关键词。
@@ -306,10 +330,8 @@ def open_manual():
         ### 🕵️‍♂️ System Profile
         **Be Holmes** is an omniscient financial detective.
         
-        ### 🚀 V16.0 Engine: Hybrid Search
-        To fix API blind spots, we now perform a **"Full Market Scan"**.
-        1. **Snapshot:** Fetches the top 500 active markets into local memory.
-        2. **Neural Match:** Performs local semantic matching to guarantee 100% recall of popular markets like "SpaceX IPO".
+        ### 🚀 V17.0 Engine: Dual-Track Search
+        We now query both `/events` and `/markets` endpoints simultaneously to ensure zero-blind-spot retrieval of both grouped and standalone contracts.
         """)
 
 # ================= 🖥️ 7. MAIN INTERFACE =================
@@ -334,7 +356,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🌊 Market Sonar (Top 5)")
     with st.spinner("Initializing Sonar..."):
-        top_markets = fetch_top_markets()
+        top_markets = fetch_sidebar_markets()
     if top_markets:
         for m in top_markets[:5]:
             st.caption(f"📅 {m['title']}")
@@ -366,26 +388,26 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required to initiate investigation.")
     else:
-        with st.status("🚀 Initiating Hybrid Search Protocol...", expanded=True) as status:
+        with st.status("🚀 Initiating Dual-Track Search...", expanded=True) as status:
             st.write("🧠 Extracting intent (Gemini 2.5)...")
             search_keywords = extract_search_terms_ai(user_news, active_key)
             
             sonar_markets = []
             if search_keywords:
-                st.write(f"🌊 Scanning Top 500 Markets for: {search_keywords}...")
-                # V16 混合搜索
-                sonar_markets = hybrid_search(search_keywords)
-                st.write(f"✅ Neural Match: Found {len(sonar_markets)} markets locally.")
+                st.write(f"🌊 Scanning Events & Markets for: {search_keywords}...")
+                # V17 双轨搜索
+                sonar_markets = dual_track_search(search_keywords)
+                st.write(f"✅ Dual-Track Result: Found {len(sonar_markets)} relevant markets.")
             
-            # 如果真的没搜到，再用 API 搜索做最后尝试
+            # 如果真的没搜到，再用 Top 市场兜底
             if not sonar_markets:
-                st.write("⚠️ Local match failed. Trying API Fallback...")
-                # 这里可以加个逻辑，但 hybrid_search 内部已经包含了 fallback
-                
+                st.write("⚠️ Deep scan empty. Falling back to global top markets.")
+                sonar_markets = top_markets
+            
             st.write("⚖️ Calculating Alpha...")
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        if not sonar_markets: st.error("⚠️ No relevant markets found (Deep Scan failed).")
+        if not sonar_markets: st.error("⚠️ No relevant markets found in the database.")
         else:
             with st.spinner(">> Deducing Alpha..."):
                 result = consult_holmes(user_news, sonar_markets, active_key)
