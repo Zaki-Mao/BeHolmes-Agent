@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
-import time
+import re
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
@@ -89,10 +89,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🔐 3. KEY MANAGEMENT (BYOK) =================
+# ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (DEEP SONAR V2.0) =================
+# ================= 📡 4. DATA ENGINE (FIXED) =================
+
+def detect_language_type(text):
+    """Simple detector: if text contains Chinese characters, return 'Chinese'"""
+    for char in text:
+        if '\u4e00' <= char <= '\u9fff':
+            return "CHINESE"
+    return "ENGLISH"
 
 def parse_market_data(data):
     markets_clean = []
@@ -143,7 +150,7 @@ def fetch_top_markets():
 def deep_sonar_search(keyword):
     if not keyword: return []
     try:
-        # 🔥 FIX 1: 扩大搜索范围 limit=100，确保冷门 IPO 市场也能被抓到
+        # 🔥 FIX: Limit increased to 100 to find niche markets (like SpaceX IPO)
         response = requests.get(f"https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&q={keyword}", headers={"User-Agent": "BeHolmes/1.0"}, timeout=8)
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
@@ -153,15 +160,20 @@ def extract_keywords_with_ai(user_text, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # 🔥 FIX 2: 强制 AI 提取更具体的"实体+事件"组合 (SpaceX IPO)，而不仅仅是通用名词
+        # 🔥 FIX: Force translation of Chinese input to English keywords for Polymarket API
         prompt = f"""
-        Act as a search query optimizer for a prediction market database.
-        Extract the most specific 'Entity + Event' keyword from the text.
-        Avoid generic terms if specific ones exist (e.g., prefer "SpaceX IPO" over "Musk").
+        Task: Convert the input text into a specific English search query for the Polymarket database.
         
-        Text: '{user_text}'
+        Rules:
+        1. Ignore conversational filler.
+        2. Identify the core 'Entity' + 'Event'.
+        3. OUTPUT ONLY THE ENGLISH KEYWORD.
         
-        Output strictly 1 best keyword phrase.
+        Input: "{user_text}"
+        Example Input: "马斯克的SpaceX要上市了吗" -> Output: "SpaceX IPO"
+        Example Input: "Will Trump deport people?" -> Output: "Trump deport"
+        
+        Your Output:
         """
         response = model.generate_content(prompt)
         return response.text.strip()
@@ -173,42 +185,49 @@ def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # 将搜索到的前 100 个结果都喂给 AI，增加命中率
+        
+        # Scan 100 items to find the needle in the haystack
         markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:100]])
+        
+        # 🔥 FIX: Strict Python-side language detection
+        target_language = detect_language_type(user_evidence)
         
         prompt = f"""
         Role: You are **Be Holmes**, a Senior Hedge Fund Strategist.
-        Goal: Match the evidence to the **EXACT** market in the list. Do not hallucinate connections if the direct market exists.
-
-        [Evidence]: "{user_evidence}"
-        [Market Data Scan]: 
+        
+        [User Input]: "{user_evidence}"
+        [Market Data]: 
         {markets_text}
 
-        **PROTOCOL:**
-        1. **Precision Matching:** Look for the market that *directly* trades on the event mentioned (e.g., if news is "SpaceX IPO", look for "SpaceX IPO" market).
-        2. **Fallback:** Only if the exact market is missing, choose the closest correlated asset and explain the correlation clearly.
+        **MANDATORY INSTRUCTION:**
+        **You MUST write the entire report in {target_language}.**
+        If {target_language} is CHINESE, use Simplified Chinese (简体中文).
+        
+        **ANALYSIS PROTOCOL:**
+        1. **Exact Match First:** Scan the list for the specific event mentioned (e.g., if input is "SpaceX IPO", find the "SpaceX IPO" market). Do NOT settle for a related company (like Tesla) unless the exact market is truly missing.
+        2. **Correlation Logic:** If the specific market exists, analyze IT. If not, explicitly state "Direct market not found" and analyze the closest proxy.
         
         **OUTPUT FORMAT (Strict Markdown):**
         
         ---
-        ### 🕵️‍♂️ Case File: [Exact Market Title]
+        ### 🕵️‍♂️ Case File: [Market Title]
         
         <div class="ticker-box">
-        🔥 LIVE SNAPSHOT: [Insert Live Odds Here]
+        🔥 LIVE SNAPSHOT: [Insert Odds]
         </div>
         
-        **1. ⚖️ The Verdict**
-        - **Signal:** 🟢 AGGRESSIVE BUY / 🔴 HARD SELL / ⚠️ WAIT & WATCH
-        - **Confidence Score:** **[0-100]%**
-        - **Target:** Market implies [Current %], I value it at [Your %].
+        **1. ⚖️ The Verdict (交易指令)**
+        - **Signal:** 🟢 AGGRESSIVE BUY / 🔴 HARD SELL / ⚠️ WAIT
+        - **Confidence:** **[0-100]%**
+        - **Valuation:** Market says [X%], I say [Y%].
         
-        **2. 🧠 Deep Logic**
-        > *[Analysis 200 words. Explain why the odds are wrong based on the evidence.]*
+        **2. 🧠 Deep Logic (深度推演)**
+        > *[Analysis in {target_language}. 200 words. Explain the causal link deeply. Why is the market mispricing this?]*
         
-        **3. 🛡️ Execution Protocol**
-        - **Action:** [Specific Instruction]
+        **3. 🛡️ Execution Protocol (执行方案)**
+        - **Action:** [Instruction in {target_language}]
         - **Timeframe:** [Duration]
-        - **Exit:** [Stop Loss/Take Profit]
+        - **Exit:** [Stop Loss condition]
         ---
         """
         response = model.generate_content(prompt)
@@ -322,7 +341,7 @@ if ignite_btn:
             sonar_markets = []
             if search_keywords:
                 st.write(f"🌊 Active Sonar Ping: '{search_keywords}'...")
-                # 传入更具体的关键词，获取更多结果 (limit=100)
+                # Search increased to limit=100
                 sonar_markets = deep_sonar_search(search_keywords)
                 st.write(f"✅ Found {len(sonar_markets)} specific markets in deep storage.")
             
