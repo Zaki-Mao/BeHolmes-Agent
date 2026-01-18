@@ -3,6 +3,7 @@ import requests
 import json
 import google.generativeai as genai
 import re
+import time
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
