@@ -89,11 +89,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🔐 3. KEY MANAGEMENT (BYOK Logic) =================
-# Logic moved to Sidebar section below for better UX flow
+# ================= 🔐 3. KEY MANAGEMENT (BYOK) =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (DEEP SONAR) =================
+# ================= 📡 4. DATA ENGINE (DEEP SONAR V2.0) =================
 
 def parse_market_data(data):
     markets_clean = []
@@ -144,7 +143,8 @@ def fetch_top_markets():
 def deep_sonar_search(keyword):
     if not keyword: return []
     try:
-        response = requests.get(f"https://gamma-api.polymarket.com/events?limit=20&active=true&closed=false&q={keyword}", headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
+        # 🔥 FIX 1: 扩大搜索范围 limit=100，确保冷门 IPO 市场也能被抓到
+        response = requests.get(f"https://gamma-api.polymarket.com/events?limit=100&active=true&closed=false&q={keyword}", headers={"User-Agent": "BeHolmes/1.0"}, timeout=8)
         return parse_market_data(response.json()) if response.status_code == 200 else []
     except: return []
 
@@ -153,29 +153,40 @@ def extract_keywords_with_ai(user_text, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(f"Extract 1-2 most important English keywords for a search engine from this text. Text: '{user_text}'. Output strictly format: keyword1 keyword2")
+        # 🔥 FIX 2: 强制 AI 提取更具体的"实体+事件"组合 (SpaceX IPO)，而不仅仅是通用名词
+        prompt = f"""
+        Act as a search query optimizer for a prediction market database.
+        Extract the most specific 'Entity + Event' keyword from the text.
+        Avoid generic terms if specific ones exist (e.g., prefer "SpaceX IPO" over "Musk").
+        
+        Text: '{user_text}'
+        
+        Output strictly 1 best keyword phrase.
+        """
+        response = model.generate_content(prompt)
         return response.text.strip()
     except: return None
 
-# ================= 🧠 5. INTELLIGENCE LAYER =================
+# ================= 🧠 5. INTELLIGENCE LAYER (The Expert) =================
 
 def consult_holmes(user_evidence, market_list, key):
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:50]])
+        # 将搜索到的前 100 个结果都喂给 AI，增加命中率
+        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:100]])
         
         prompt = f"""
-        Role: You are **Be Holmes**, a Senior Hedge Fund Strategist specializing in Prediction Markets. 
-        You do not just summarize news; you provide **ruthless, high-conviction trading mandates**.
+        Role: You are **Be Holmes**, a Senior Hedge Fund Strategist.
+        Goal: Match the evidence to the **EXACT** market in the list. Do not hallucinate connections if the direct market exists.
 
-        [Evidence / Intel]: "{user_evidence}"
+        [Evidence]: "{user_evidence}"
         [Market Data Scan]: 
         {markets_text}
 
         **PROTOCOL:**
-        1. **Language:** IF input is Chinese -> Output strictly in CHINESE. ELSE -> ENGLISH.
-        2. **Reasoning:** Use "Second-Order Thinking". Do not just look at the event; look at how the market *perceives* the event. Is it priced in? Is it a trap?
+        1. **Precision Matching:** Look for the market that *directly* trades on the event mentioned (e.g., if news is "SpaceX IPO", look for "SpaceX IPO" market).
+        2. **Fallback:** Only if the exact market is missing, choose the closest correlated asset and explain the correlation clearly.
         
         **OUTPUT FORMAT (Strict Markdown):**
         
@@ -186,18 +197,18 @@ def consult_holmes(user_evidence, market_list, key):
         🔥 LIVE SNAPSHOT: [Insert Live Odds Here]
         </div>
         
-        **1. ⚖️ The Verdict (交易指令)**
+        **1. ⚖️ The Verdict**
         - **Signal:** 🟢 AGGRESSIVE BUY / 🔴 HARD SELL / ⚠️ WAIT & WATCH
-        - **Confidence Score:** **[0-100]%** (Be precise)
+        - **Confidence Score:** **[0-100]%**
         - **Target:** Market implies [Current %], I value it at [Your %].
         
-        **2. 🧠 Deep Logic (深度推演)**
-        > *[MANDATORY: Write a comprehensive 200-word analysis. Start with the hard facts, then explain the transmission mechanism to the market price. Why is the crowd wrong? Explain the "Alpha".]*
+        **2. 🧠 Deep Logic**
+        > *[Analysis 200 words. Explain why the odds are wrong based on the evidence.]*
         
-        **3. 🛡️ Execution Protocol (执行方案)**
-        - **Action:** [Specific instruction, e.g., "Enter now at current odds"]
-        - **Timeframe:** [e.g., "Hold for 48 hours" or "Hold until official confirmation"]
-        - **Exit Condition:** [e.g., "Take profit if odds hit 60%" or "Stop loss if X happens"]
+        **3. 🛡️ Execution Protocol**
+        - **Action:** [Specific Instruction]
+        - **Timeframe:** [Duration]
+        - **Exit:** [Stop Loss/Take Profit]
         ---
         """
         response = model.generate_content(prompt)
@@ -251,17 +262,14 @@ def open_manual():
 
 # ================= 🖥️ 7. MAIN INTERFACE =================
 
-# --- Sidebar (With BYOK Logic) ---
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
     
-    # --- 🔐 BYOK Module ---
     with st.expander("🔑 API Key Settings", expanded=False):
         st.caption("Rate limited? Enter your own Google AI Key.")
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
 
-    # Key Logic
     if user_api_key:
         active_key = user_api_key
         st.success("🔓 User Key Active")
@@ -287,7 +295,6 @@ st.title("Be Holmes")
 st.caption("EVENT-DRIVEN INTELLIGENCE | SECOND-ORDER CAUSAL REASONING") 
 st.markdown("---")
 
-# 1. Evidence Input
 st.markdown("### 📁 EVIDENCE INPUT")
 user_news = st.text_area(
     "Input News / Rumors / X Links...", 
@@ -296,7 +303,6 @@ user_news = st.text_area(
     label_visibility="collapsed"
 )
 
-# 2. Action Zone
 col_btn_main, col_btn_help = st.columns([4, 1])
 with col_btn_main:
     ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
@@ -309,15 +315,14 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required to initiate investigation.")
     else:
-        # --- LOGIC ---
         with st.status("🚀 Initiating Deep Scan...", expanded=True) as status:
             st.write("🧠 Extracting semantic keywords (Gemini 2.5)...")
-            # Use active_key (User's or System's)
             search_keywords = extract_keywords_with_ai(user_news, active_key)
             
             sonar_markets = []
             if search_keywords:
                 st.write(f"🌊 Active Sonar Ping: '{search_keywords}'...")
+                # 传入更具体的关键词，获取更多结果 (limit=100)
                 sonar_markets = deep_sonar_search(search_keywords)
                 st.write(f"✅ Found {len(sonar_markets)} specific markets in deep storage.")
             
@@ -333,7 +338,6 @@ if ignite_btn:
         if not unique_markets: st.error("⚠️ No relevant markets found in the database.")
         else:
             with st.spinner(">> Deducing Alpha..."):
-                # Use active_key (User's or System's)
                 result = consult_holmes(user_news, unique_markets, active_key)
                 st.markdown("---")
                 st.markdown("### 📝 INVESTIGATION REPORT")
