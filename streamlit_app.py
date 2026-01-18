@@ -15,6 +15,22 @@ st.set_page_config(
 # ================= 🎨 2. UI DESIGN (Magma Red - Professional) =================
 st.markdown("""
 <style>
+    /* --- HIDE STREAMLIT SYSTEM ELEMENTS (CLEAN MODE) --- */
+    /* 隐藏右上角 Hamburger Menu, Share, Edit, Star */
+    [data-testid="stToolbar"] {
+        visibility: hidden;
+        height: 0%;
+        position: fixed;
+    }
+    /* 隐藏底部的 "Made with Streamlit" */
+    footer {
+        visibility: hidden;
+    }
+    /* 隐藏顶部的彩色线条装饰 */
+    header {
+        visibility: hidden;
+    }
+
     /* --- Global Background: Void Black --- */
     .stApp { background-color: #050505; font-family: 'Roboto Mono', monospace; }
     [data-testid="stSidebar"] { background-color: #000000; border-right: 1px solid #1a1a1a; }
@@ -314,7 +330,6 @@ with st.sidebar:
     else: st.error("⚠️ Data Stream Offline")
 
 # --- Main Stage ---
-# 移除了图标，只保留文字，应用了熔岩渐变色CSS
 st.title("Be Holmes")
 st.caption("EVENT-DRIVEN INTELLIGENCE | SECOND-ORDER CAUSAL REASONING") 
 st.markdown("---")
