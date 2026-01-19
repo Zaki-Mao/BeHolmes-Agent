@@ -71,45 +71,44 @@ def normalize_market_data(m):
 # ================= 📡 5. CORE SEARCH ENGINE =================
 def search_polymarket_native(keywords):
     """
-    ✅ 使用 Polymarket GraphQL 接口的 searchMarkets()，可模糊匹配标题
+    ✅ 使用 Polymarket gamma-api 最新版搜索接口。
+    该接口与官网一致，支持模糊匹配标题。
     """
     results, seen = [], set()
-    url = "https://api.polymarket.com/graphql"
 
     for kw in keywords:
         if not kw:
             continue
-
-        payload = {
-            "query": """
-            query SearchMarkets($term: String!) {
-              searchMarkets(term: $term, limit: 50) {
-                id
-                question
-                slug
-                outcomes
-                outcomePrices
-                volume
-                closed
-              }
-            }
-            """,
-            "variables": {"term": kw}
-        }
-
         try:
-            resp = requests.post(url, json=payload, headers={"User-Agent": "BeHolmes/1.0"}, timeout=6)
+            url = f"https://gamma-api.polymarket.com/search"
+            params = {"query": kw, "limit": 50}
+            headers = {"User-Agent": "BeHolmes/1.1"}
+            resp = requests.get(url, params=params, headers=headers, timeout=6)
+
             if resp.status_code == 200:
-                data = resp.json().get("data", {}).get("searchMarkets", [])
-                for m in data:
+                data = resp.json()
+
+                # gamma 的 search 结果分成 "markets" 和 "events"
+                markets = data.get("markets", [])
+                events = data.get("events", [])
+
+                for m in markets:
                     p = normalize_market_data(m)
                     if p and p['slug'] not in seen:
                         results.append(p)
                         seen.add(p['slug'])
-        except Exception as e:
-            print("GraphQL Search Error:", e)
 
-    # Dome 兜底方案（冷门市场或 GraphQL 不稳定时）
+                for ev in events:
+                    for m in ev.get("markets", []):
+                        p = normalize_market_data(m)
+                        if p and p['slug'] not in seen:
+                            p['title'] = f"📂 [EVENT] {p['title']}"
+                            results.append(p)
+                            seen.add(p['slug'])
+        except Exception as e:
+            print("Search Error:", e)
+
+    # Dome fallback（保留，防止 gamma 挂了）
     if not results and DOME_API_KEY:
         try:
             url_dome = "https://api.domeapi.io/v1/polymarket/markets"
@@ -128,6 +127,7 @@ def search_polymarket_native(keywords):
 
     results.sort(key=lambda x: x['volume'], reverse=True)
     return results
+
 
 
 # ================= 🧠 6. AI EXTRACTION =================
@@ -261,4 +261,5 @@ if ignite_btn:
                 st.markdown("---")
                 st.markdown("### 📝 INVESTIGATION REPORT")
                 st.markdown(result, unsafe_allow_html=True)
+
 
