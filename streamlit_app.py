@@ -4,11 +4,25 @@ import json
 import google.generativeai as genai
 import re
 
-# ================= 🔑 0. API KEYS (V1.0 CORE) =================
-EXA_API_KEY = "2b15f3e3-0787-4bdc-99c9-9e17aade05c2"
-GOOGLE_API_KEY = "AIzaSyA7_zfVYaujlKudJPw9U8YnS5GA-yDpR5I"
+# ================= 🔐 0. SAFE KEY MANAGEMENT =================
+# 自动从 Streamlit Secrets 读取 Key，防止 GitHub 泄露
+try:
+    EXA_API_KEY = st.secrets["EXA_API_KEY"]
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    KEYS_LOADED = True
+except FileNotFoundError:
+    EXA_API_KEY = None
+    GOOGLE_API_KEY = None
+    KEYS_LOADED = False
+except KeyError:
+    # 处理 secrets 存在但 key 缺失的情况
+    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
+    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
+    KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
 
-genai.configure(api_key=GOOGLE_API_KEY)
+# 配置 Gemini
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 # ================= 🛠️ 核心依赖检测 =================
 try:
@@ -39,6 +53,7 @@ st.markdown("""
     /* 隐藏默认头部 */
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
     header { visibility: hidden; }
+    footer { visibility: hidden; }
     
     /* 2. 侧边栏深度定制 */
     [data-testid="stSidebar"] { 
@@ -80,6 +95,7 @@ st.markdown("""
     .stButton button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 15px rgba(217, 4, 41, 0.4);
+        color: white !important;
     }
 
     /* 6. 市场卡片 (Market Card) */
@@ -114,18 +130,18 @@ st.markdown("""
     
     /* 8. 侧边栏 Ticker 样式 */
     .ticker-item {
-        padding: 10px 0;
+        padding: 12px 0;
         border-bottom: 1px solid #1A1A1A;
         font-size: 0.85rem;
     }
-    .ticker-title { color: #CCC; margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ticker-price { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-weight: bold; }
-    .ticker-vol { color: #555; float: right; font-size: 0.75rem; }
+    .ticker-title { color: #CCC; margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;}
+    .ticker-price { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-weight: bold; font-size: 1rem;}
+    .ticker-vol { color: #555; float: right; font-size: 0.75rem; margin-top: 2px;}
     
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE (V1.0) =================
+# ================= 🧠 3. LOGIC CORE =================
 
 def detect_language(text):
     for char in text:
@@ -133,6 +149,7 @@ def detect_language(text):
     return "ENGLISH"
 
 def generate_english_keywords(user_text):
+    """Bilingual Bridge: Translate Chinese intent to English keywords"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{user_text}". Output: Keywords only."""
@@ -141,7 +158,7 @@ def generate_english_keywords(user_text):
     except: return user_text
 
 def search_with_exa(query):
-    if not EXA_AVAILABLE: return [], query
+    if not EXA_AVAILABLE or not EXA_API_KEY: return [], query
     search_query = generate_english_keywords(query)
     markets_found, seen_ids = [], set()
     try:
@@ -159,7 +176,8 @@ def search_with_exa(query):
                     if market_data:
                         markets_found.extend(market_data)
                         seen_ids.add(slug)
-    except: pass
+    except Exception as e:
+        print(f"Search error: {e}")
     return markets_found, search_query
 
 def fetch_poly_details(slug):
@@ -208,6 +226,7 @@ def normalize_data(m):
 # ================= 🌟 4. GENIUS ANALYST PROMPT =================
 
 def consult_holmes(user_input, market_data):
+    if not GOOGLE_API_KEY: return "AI Key Missing."
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         lang = detect_language(user_input)
@@ -257,101 +276,102 @@ def consult_holmes(user_input, market_data):
 
 # ================= 🖥️ 5. MAIN INTERFACE =================
 
-# --- A. 侧边栏：实时行情 Ticker (扩容到 10 个) ---
+# --- A. 侧边栏：实时行情 Ticker (Top 10) ---
 with st.sidebar:
     st.markdown("### 📡 LIVE FEED")
     st.caption("Top 10 Active Markets")
     
-    try:
-        # 拉取 Top 10
-        url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
-        live_mkts = requests.get(url, timeout=3).json()
-        
-        for m in live_mkts:
-            p = normalize_data(m)
-            if p:
-                # 使用自定义 HTML 渲染紧凑的 Ticker
-                st.markdown(f"""
-                <div class="ticker-item">
-                    <span class="ticker-title" title="{p['title']}">{p['title']}</span>
-                    <span class="ticker-price">{p['odds']}</span>
-                    <span class="ticker-vol">${p['volume']/1000000:.1f}M</span>
-                </div>
-                """, unsafe_allow_html=True)
-    except:
-        st.warning("⚠️ Connecting...")
+    if KEYS_LOADED:
+        try:
+            # 拉取 Top 10 Active Markets
+            url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
+            live_mkts = requests.get(url, timeout=3).json()
+            
+            for m in live_mkts:
+                p = normalize_data(m)
+                if p:
+                    st.markdown(f"""
+                    <div class="ticker-item">
+                        <span class="ticker-title" title="{p['title']}">{p['title']}</span>
+                        <span class="ticker-price">{p['odds']}</span>
+                        <span class="ticker-vol">${p['volume']/1000000:.1f}M</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+        except:
+            st.warning("⚠️ Connection slow...")
+    else:
+        st.error("🔒 Keys Missing")
+        st.caption("Please add EXA_API_KEY and GOOGLE_API_KEY to Streamlit Secrets.")
 
     st.markdown("---")
-    st.caption("🟢 System Status: **Online**")
-    st.caption("🔑 Keys: **Pre-loaded**")
+    if KEYS_LOADED:
+        st.success("🟢 System: **Online**")
+    else:
+        st.error("🔴 System: **Offline**")
 
 # --- B. 顶部：标题 & 手册按钮 ---
 c1, c2 = st.columns([6, 1])
 with c1:
     st.title("Be Holmes")
-    st.caption("THE GENIUS TRADER | V1.1 RED EDITION")
+    st.caption("THE GENIUS TRADER | V2.0 STABLE")
 
 with c2:
-    # 增加间距让按钮对齐更好
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("📘 Manual"):
         @st.dialog("User Manual / 使用手册")
         def show_manual():
-            # 手册内部的状态切换
             lang_mode = st.radio("Language / 语言", ["English", "中文"], horizontal=True)
-            
             st.markdown("---")
-            
             if lang_mode == "中文":
                 st.markdown("""
                 ### 🕵️‍♂️ Be Holmes 使用指南
                 
                 **1. 核心逻辑**
-                Be Holmes 不是简单的搜索引擎。它利用 **Exa 神经网络** 理解你的模糊意图，连接 **Polymarket** 实时数据，最后由 **Gemini** 扮演顶级基金经理进行博弈分析。
+                本工具利用 **Exa 神经搜索** 连接 **Polymarket** 实时数据，由 **Gemini** 扮演顶级基金经理进行博弈分析。
                 
-                **2. 如何输入**
-                * **支持语言：** 中文或英文皆可。
-                * **输入什么：** 新闻、推特截图文字、甚至是模糊的传言。
-                * *示例：* “特朗普要买格陵兰岛”、“马斯克星舰发射成功率”。
+                **2. 核心功能**
+                * **双语支持：** 输入中文，系统自动转译为英文关键词搜索，再用中文回答。
+                * **博弈分析：** 识别“已定价”消息，避免追高。
+                * **实时数据：** 直接从链上获取最新赔率。
                 
                 **3. 读懂报告**
-                * **Priced-in Check (定价检测)：** 帮你判断这是否是旧闻。
-                * **Final Call (最终决策)：** * 🟢 **BUY:** 市场低估了消息，那是 Alpha。
-                    * ⚪ **WAIT:** 消息已反映在价格里，别追高。
+                * 🟢 **BUY:** 市场低估了消息，Alpha 机会。
+                * ⚪ **WAIT:** 消息已反映在价格里，别做韭菜。
                 
                 **4. 免责声明**
-                本工具仅供信息参考，不构成直接的投资建议。Crypto 市场波动极大，请自行承担风险。
+                本工具仅供信息参考，不构成投资建议。
                 """)
             else:
                 st.markdown("""
                 ### 🕵️‍♂️ Be Holmes User Guide
                 
                 **1. Core Logic**
-                Be Holmes is not just a search engine. It uses **Exa Neural Search** to bridge your intent with **Polymarket** contracts, then employs **Gemini** as a hedge fund manager to analyze the odds.
+                Bridges your intent with **Polymarket** contracts using **Exa Neural Search**, analyzed by **Gemini**.
                 
-                **2. What to Input**
-                * **Language:** English or Chinese.
-                * **Content:** News headlines, rumors, tweet summaries.
-                * *Examples:* "Trump Greenland Tariffs", "SpaceX Starship launch odds".
+                **2. Key Features**
+                * **Bilingual:** Auto-translates Chinese intent to English markets.
+                * **Game Theory:** Checks if news is "Priced-in".
+                * **Real-time:** Live on-chain odds.
                 
-                **3. The Strategy**
-                * **Priced-in Check:** Checks if the market already knows this news.
-                * **Final Call:** * 🟢 **BUY:** Market is sleeping on this news.
-                    * ⚪ **WAIT:** News is already priced in.
+                **3. The Verdict**
+                * 🟢 **BUY:** Market is sleeping on this news.
+                * ⚪ **WAIT:** News is already priced in.
                 
                 **4. Disclaimer**
-                For informational purposes only. Not financial advice.
+                Not financial advice.
                 """)
         show_manual()
 
 st.markdown("---")
 
 # --- C. 核心交互区 ---
-user_news = st.text_area("Input Intel / News...", height=120, placeholder="Paste news here... (e.g. 特朗普宣布2月1日加征关税)")
+user_news = st.text_area("Input Intel / News...", height=120, placeholder="Paste news here... (e.g. 特朗普宣布2月1日加征关税 / SpaceX IPO)")
 ignite_btn = st.button("🔍 DECODE ALPHA", use_container_width=True)
 
 if ignite_btn:
-    if not user_news:
+    if not KEYS_LOADED:
+        st.error("❌ API Keys not found. Please set them in Streamlit Secrets.")
+    elif not user_news:
         st.warning("⚠️ Please input intel first.")
     else:
         with st.status("🧠 Holmes is thinking...", expanded=True) as status:
@@ -390,7 +410,6 @@ if ignite_btn:
             """, unsafe_allow_html=True)
             
             link = f"https://polymarket.com/event/{m['slug']}"
-            # 按钮样式已经通过 CSS 全局优化为红色
             st.markdown(f"<a href='{link}' target='_blank'><button class='stButton' style='width:100%; border-radius:8px; background:#D90429; color:white; padding:10px; border:none; font-weight:bold; cursor:pointer;'>🚀 TRADE ON POLYMARKET</button></a>", unsafe_allow_html=True)
 
         st.markdown("### 🧠 Strategic Report")
