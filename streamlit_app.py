@@ -15,13 +15,12 @@ st.set_page_config(
 # 🔥 DOME KEY (Backup)
 DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
 
-# 🔥 FAIL-SAFE DICTIONARY (兜底保障)
-# 如果 API 搜不到，强制返回这些热门 ID，保证演示效果
+# 🔥 FAIL-SAFE DICTIONARY
 KNOWN_SLUGS = {
     "spacex": ["spacex-ipo-closing-market-cap", "will-spacex-ipo-in-2025"],
     "trump": ["presidential-election-winner-2028"],
     "gpt": ["chatgpt-5-release-in-2025"],
-    "starship": ["spacex-starship-flight-test-12"]
+    "rate": ["fed-interest-rates-nov-2024"]
 }
 
 # ================= 🎨 2. UI DESIGN (Magma Red) =================
@@ -45,16 +44,20 @@ st.markdown("""
         background-color: #0A0A0A !important; color: #E63946 !important; 
         border: 1px solid #333 !important; border-radius: 6px;
     }
+    /* 报告卡片样式 */
+    .report-card {
+        background-color: #111; border: 1px solid #333; 
+        border-left: 5px solid #FF4500; padding: 20px; margin-bottom: 20px;
+    }
+    .market-card {
+        background-color: #080808; border: 1px solid #222;
+        padding: 15px; margin-bottom: 10px; border-radius: 5px;
+    }
     .execute-btn {
         background: linear-gradient(90deg, #FF4500, #FFD700); 
         border: none; color: #000; width: 100%; padding: 15px;
         font-weight: 900; font-size: 16px; cursor: pointer; border-radius: 6px;
         text-transform: uppercase; letter-spacing: 2px; margin-top: 20px;
-    }
-    .ticker-box {
-        background-color: #080808; border: 1px solid #222; border-left: 4px solid #FF4500;
-        color: #FF4500; font-family: 'Courier New', monospace; padding: 15px; margin: 15px 0;
-        font-size: 1.05em; font-weight: bold; display: flex; align-items: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -62,180 +65,116 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📊 4. DATA NORMALIZATION =================
+# ================= 🧠 4. CORE LOGIC: ANALYSIS FIRST =================
+
+def generate_alpha_report(news, key):
+    """
+    Step 1: 纯 AI 逻辑推理 (不依赖 Polymarket)
+    生成一份专业的宏观/事件驱动分析报告。
+    """
+    try:
+        genai.configure(api_key=key)
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = f"""
+        Role: You are **Be Holmes**, a legendary Global Macro Strategist & Alpha Hunter.
+        You have a sharp nose for 2nd & 3rd order effects.
+        
+        Input News: "{news}"
+        
+        Task: Analyze this news and provide an investment thesis.
+        
+        **OUTPUT FORMAT (Markdown):**
+        
+        ### 🧠 Holmes' Strategic Thesis
+        
+        **1. The Signal (信号判读)**
+        > [One sentence summary: Bullish/Bearish/Neutral for what asset?]
+        
+        **2. The Ripple Effect (二阶推演)**
+        * [Direct Impact]: e.g., SpaceX IPO -> TSLA stock up.
+        * [Hidden Impact]: e.g., Competitors (Boeing) down.
+        
+        **3. Actionable Advice (投资建议)**
+        * **Long (做多):** [Assets]
+        * **Short (做空):** [Assets]
+        * **Prediction Market Strategy:** What specific "Yes/No" bet would you look for? (e.g., "Bet YES on SpaceX IPO before Dec")
+        """
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"❌ Analysis Failed: {str(e)}"
+
+def extract_search_keyword(news, key):
+    """提取一个最核心的搜索词"""
+    try:
+        genai.configure(api_key=key)
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(f"Extract ONE core English entity keyword from: '{news}'. Output only the word.")
+        return response.text.strip()
+    except: return news.split()[0]
+
+# ================= 📡 5. DATA LOGIC: SEARCH SECOND =================
+
 def normalize_market_data(m):
     try:
         if m.get('closed') is True: return None
-        title = m.get('question', m.get('title', 'Unknown Market'))
+        title = m.get('question', m.get('title', 'Unknown'))
         slug = m.get('slug', m.get('market_slug', ''))
-        
-        # 赔率解析
-        odds_display = "N/A"
+        odds = "N/A"
         try:
-            raw_outcomes = m.get('outcomes', '["Yes", "No"]')
-            outcomes = json.loads(raw_outcomes) if isinstance(raw_outcomes, str) else raw_outcomes
-            
-            raw_prices = m.get('outcomePrices', '[]')
-            prices = json.loads(raw_prices) if isinstance(raw_prices, str) else raw_prices
-            
-            odds_list = []
-            if prices and len(prices) == len(outcomes):
-                for o, p in zip(outcomes, prices):
-                    val = float(p) * 100
-                    if val > 0.1: odds_list.append(f"{o}: {val:.1f}%")
-            odds_display = " | ".join(odds_list)
+            outcomes = json.loads(m.get('outcomes', '[]')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+            prices = json.loads(m.get('outcomePrices', '[]')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+            if outcomes and prices:
+                odds = " | ".join([f"{o}: {float(p)*100:.1f}%" for o, p in zip(outcomes, prices)])
         except: pass
-        
-        volume = float(m.get('volume', 0))
-        # V3.0: 移除 Volume 限制，确保能搜到冷门但相关的市场
-        return {"title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id')}
+        return {"title": title, "odds": odds, "slug": slug, "volume": float(m.get('volume', 0))}
     except: return None
 
-# ================= 📡 5. CORE SEARCH ENGINE (V3.0) =================
-def search_polymarket_v3(keywords):
-    """
-    🔥 V3.0 混合引擎:
-    1. Gamma Search API (Markets + Events)
-    2. Dome API Backup
-    3. Hardcoded Failsafe
-    """
+def search_polymarket(keyword):
+    """V3.0 搜索逻辑：Gamma API + Dome + Failsafe"""
     results = []
     seen = set()
-
-    # --- Phase 1: Gamma Search API (New Endpoint) ---
-    url = "https://gamma-api.polymarket.com/search"
-    headers = {"User-Agent": "BeHolmes/3.0"}
     
-    for kw in keywords:
-        if not kw: continue
-        try:
-            params = {"query": kw, "limit": 50}
-            resp = requests.get(url, params=params, headers=headers, timeout=5)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                
-                # 1. 解析 Markets (直接合约)
-                markets = data.get("markets", [])
-                for m in markets:
-                    p = normalize_market_data(m)
-                    if p and p['slug'] not in seen:
-                        results.append(p)
-                        seen.add(p['slug'])
-                
-                # 2. 解析 Events (聚合事件) -> 往往包含更准确的 Group
-                events = data.get("events", [])
-                for ev in events:
-                    for m in ev.get("markets", []):
-                        p = normalize_market_data(m)
-                        if p and p['slug'] not in seen:
-                            p['title'] = f"📂 [EVENT] {p['title']}"
-                            results.append(p)
-                            seen.add(p['slug'])
-        except Exception as e:
-            print(f"Gamma Search Error: {e}")
-
-    # --- Phase 2: Dome Backup (如果 Gamma 挂了) ---
-    if not results and DOME_API_KEY:
-        try:
-            url_dome = "https://api.domeapi.io/v1/polymarket/markets"
-            r = requests.get(url_dome, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=5)
-            if r.status_code == 200:
-                for m in r.json():
-                    p = normalize_market_data(m)
-                    if p:
-                        # 本地模糊匹配
-                        for kw in keywords:
-                            if kw.lower() in p['title'].lower() or kw.lower() in p['slug']:
-                                if p['slug'] not in seen:
-                                    p['title'] = f"🛡️ [DOME] {p['title']}"
-                                    results.append(p)
-                                    seen.add(p['slug'])
-        except: pass
-
-    # --- Phase 3: Hardcoded Fail-safe (最后的防线) ---
+    # 1. Gamma Search API
+    try:
+        url = "https://gamma-api.polymarket.com/search"
+        resp = requests.get(url, params={"query": keyword, "limit": 20}, headers={"User-Agent": "BeHolmes/4.0"}, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json()
+            for m in data.get("markets", []):
+                p = normalize_market_data(m)
+                if p and p['slug'] not in seen:
+                    results.append(p)
+                    seen.add(p['slug'])
+    except: pass
+    
+    # 2. Hardcoded Failsafe (If API fails)
     if not results:
-        for kw in keywords:
-            for key, slugs in KNOWN_SLUGS.items():
-                if key in kw.lower():
-                    for slug in slugs:
-                        try:
-                            # 精准抓取
-                            url_direct = f"https://gamma-api.polymarket.com/markets?slug={slug}"
-                            r = requests.get(url_direct, timeout=3).json()
-                            for m in r:
-                                p = normalize_market_data(m)
-                                if p and p['slug'] not in seen:
-                                    p['title'] = f"🔥 [HOT] {p['title']}"
-                                    results.append(p)
-                                    seen.add(p['slug'])
-                        except: pass
-
-    # 按成交量排序
+        for k, slugs in KNOWN_SLUGS.items():
+            if k in keyword.lower():
+                for slug in slugs:
+                    try:
+                        r = requests.get(f"https://gamma-api.polymarket.com/markets?slug={slug}").json()
+                        for m in r:
+                            p = normalize_market_data(m)
+                            if p and p['slug'] not in seen:
+                                p['title'] = "🔥 [HOT] " + p['title']
+                                results.append(p)
+                                seen.add(p['slug'])
+                    except: pass
+                    
     results.sort(key=lambda x: x['volume'], reverse=True)
     return results
 
-# ================= 🧠 6. AI EXTRACTION =================
-def extract_search_terms_ai(user_text, key):
-    try:
-        genai.configure(api_key=key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        # 强制只提取核心词，提高搜索命中率
-        prompt = f"""
-        Extract the SINGLE most important search keyword (e.g. SpaceX, Trump).
-        Input: "{user_text}" -> Output: Keyword
-        """
-        response = model.generate_content(prompt)
-        kws = [w.strip() for w in response.text.split(",") if w.strip()]
-        return kws if kws else [user_text]
-    except: return [user_text]
+# ================= 🖥️ 6. MAIN INTERFACE =================
 
-# ================= 🤖 7. HOLMES INTELLIGENCE =================
-def consult_holmes(user_evidence, market_list, key):
-    try:
-        genai.configure(api_key=key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        markets_text = "\n".join([f"- {m['title']} [Odds: {m['odds']}]" for m in market_list[:15]])
-
-        prompt = f"""
-        Role: **Be Holmes**, Senior Hedge Fund Strategist.
-        [User Input]: "{user_evidence}"
-        [Market Data Found]: 
-        {markets_text}
-
-        **INSTRUCTION:**
-        Identify the market that best matches the user's input.
-        If the input mentions "SpaceX IPO", look for markets related to "IPO", "Market Cap", or "Public".
-        
-        **OUTPUT (Markdown):**
-        ---
-        ### 🕵️‍♂️ Case File: [Best Match Title]
-        <div class="ticker-box">🔥 LIVE SNAPSHOT: [Insert Odds]</div>
-
-        **1. ⚖️ The Verdict**
-        - **Signal:** 🟢 BUY / 🔴 SELL / ⚠️ WAIT
-        - **Confidence:** [0-100]%
-
-        **2. 🧠 Deep Logic**
-        > [Analysis in Input Language]
-
-        **3. 🛡️ Execution**
-        - [Action Plan]
-        ---
-        """
-        response = model.generate_content(prompt)
-        btn_html = """<br><a href='https://polymarket.com/' target='_blank' style='text-decoration:none;'><button class='execute-btn'>🚀 EXECUTE TRADE</button></a>"""
-        return response.text + btn_html
-    except Exception as e:
-        return f"❌ Intelligence Error: {str(e)}"
-
-# ================= 🖥️ 8. MAIN UI =================
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
-        st.caption("✅ Engine: Gamma Search (V3.0)")
+        st.caption("✅ Mode: Analyst First")
 
     if user_api_key:
         active_key = user_api_key
@@ -247,48 +186,49 @@ with st.sidebar:
         st.error("⚠️ Gemini Key Missing!")
         st.stop()
 
-    st.markdown("---")
-    st.caption("🌊 Live Feed (Top 5)")
-    try:
-        r = requests.get("https://gamma-api.polymarket.com/markets?limit=5&closed=false&sort=volume").json()
-        for m in r:
-            p = normalize_market_data(m)
-            if p:
-                st.caption(f"📅 {p['title']}")
-                st.code(f"{p['odds']}")
-    except:
-        st.error("⚠️ Stream Offline")
-
 # --- Main Stage ---
 st.title("Be Holmes")
-st.caption("EVENT-DRIVEN INTELLIGENCE | V3.0 SEARCH REBORN")
+st.caption("EVENT-DRIVEN INTELLIGENCE | V4.0 OPINION FIRST") 
 st.markdown("---")
 
-user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO)")
+user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO rumors)")
 ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
 
 if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required.")
     else:
-        with st.status("🚀 Initiating Search Protocol...", expanded=True) as status:
-            st.write("🧠 Extracting core keyword...")
-            keywords = extract_search_terms_ai(user_news, active_key)
-            st.write(f"🔑 Searching for: '{keywords[0]}'")
-
-            st.write(f"🌊 Scanning Polymarket (Gamma Search + Dome)...")
-            sonar_markets = search_polymarket_v3(keywords)
-
-            if sonar_markets:
-                st.success(f"✅ FOUND: {len(sonar_markets)} markets relevant to '{keywords[0]}'.")
+        # === PHASE 1: THE ANALYSIS (100% Guaranteed) ===
+        with st.status("🧠 Phase 1: Holmes is Thinking...", expanded=True) as status:
+            st.write("Generating macro thesis & investment strategy...")
+            report = generate_alpha_report(user_news, active_key)
+            status.update(label="✅ Phase 1 Complete: Thesis Generated", state="complete", expanded=False)
+        
+        # Display Report
+        st.markdown(f"""<div class="report-card">{report}</div>""", unsafe_allow_html=True)
+        
+        # === PHASE 2: THE HUNT (Search) ===
+        st.markdown("---")
+        st.subheader("🌊 Phase 2: Polymarket Verification")
+        
+        with st.spinner("Searching for relevant prediction markets..."):
+            keyword = extract_search_keyword(user_news, active_key)
+            st.caption(f"Searching for: '{keyword}'")
+            markets = search_polymarket(keyword)
+            
+            if markets:
+                st.success(f"✅ Found {len(markets)} active markets matching the thesis.")
+                for m in markets[:3]: # Show top 3
+                    st.markdown(f"""
+                    <div class="market-card">
+                        <div style="font-size:1.1em; color:#FFD700; margin-bottom:5px;">{m['title']}</div>
+                        <div style="font-family:monospace; color:#E63946;">⚡ ODDS: {m['odds']}</div>
+                        <div style="font-size:0.8em; color:#666;">Vol: ${m['volume']:,.0f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Execution Button
+                st.markdown(f"""<a href='https://polymarket.com/?q={keyword}' target='_blank' style='text-decoration:none;'><button class='execute-btn'>🚀 TRADE THIS VIEW</button></a>""", unsafe_allow_html=True)
             else:
-                st.error("⚠️ No relevant markets found.")
-            st.write("⚖️ Calculating Alpha...")
-            status.update(label="✅ Investigation Complete", state="complete", expanded=False)
-
-        if sonar_markets:
-            with st.spinner(">> Deducing Alpha..."):
-                result = consult_holmes(user_news, sonar_markets, active_key)
-                st.markdown("---")
-                st.markdown("### 📝 INVESTIGATION REPORT")
-                st.markdown(result, unsafe_allow_html=True)
+                st.info("⚠️ No direct prediction markets found currently.")
+                st.markdown("> **Holmes' Note:** While no specific betting market exists yet, the investment advice in Phase 1 remains valid for traditional markets (Stocks/Crypto).")
