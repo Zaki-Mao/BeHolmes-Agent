@@ -2,19 +2,11 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
-import time
-import re
-
-# ================= 🛠️ 核心依赖检测 =================
-try:
-    from duckduckgo_search import DDGS
-    SEARCH_AVAILABLE = True
-except ImportError:
-    SEARCH_AVAILABLE = False
+import pandas as pd
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
-    page_title="Be Holmes | Web Hunter",
+    page_title="Be Holmes | Brute Force",
     page_icon="🕵️‍♂️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -67,83 +59,76 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. WEB SEARCH ENGINE =================
+# ================= 🧠 3. THE BRUTE FORCE ENGINE =================
 
-def search_polymarket_web(query):
+@st.cache_data(ttl=600) # 缓存 10 分钟，避免每次点击都重新请求 API
+def fetch_all_active_markets():
     """
-    核心策略：利用 DuckDuckGo 搜索 site:polymarket.com
-    这比任何 API 搜索都准，因为它利用了搜索引擎的语义能力。
+    策略：直接拉取全网最热的 1000 个市场到内存里。
+    不依赖搜索接口，依赖我们自己的 Python 过滤。
     """
-    if not SEARCH_AVAILABLE: return []
+    all_markets = []
+    url = "https://gamma-api.polymarket.com/markets"
     
-    markets_found = []
-    seen_slugs = set()
-    
-    # 构造搜索词：限制在 polymarket 域名内
-    search_query = f"site:polymarket.com {query}"
+    # 抓取 Volume 最高的 1000 个市场（基本覆盖所有热点）
+    params = {
+        "limit": 1000, 
+        "closed": "false", 
+        "sort": "volume"
+    }
     
     try:
-        with DDGS() as ddgs:
-            # 抓取前 5 条结果
-            results = list(ddgs.text(search_query, max_results=5))
-            
-            for res in results:
-                url = res['href']
-                # 解析 URL 提取 slug (ID)
-                # URL 格式通常是 polymarket.com/event/slug 或 polymarket.com/market/slug
-                match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', url)
-                
-                if match:
-                    slug = match.group(1)
-                    if slug not in seen_slugs:
-                        # 拿到 slug 后，去 Gamma API 查详细数据
-                        market_data = fetch_market_details(slug)
-                        if market_data:
-                            markets_found.extend(market_data)
-                            seen_slugs.add(slug)
-                            
-    except Exception as e:
-        print(f"Web Search Error: {e}")
-        
-    return markets_found
-
-def fetch_market_details(slug):
-    """根据 Slug 去官方 API 拉取实时赔率"""
-    # 尝试作为 Event 查询
-    try:
-        url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            if data:
-                # Event 里面可能包含多个 Markets，我们取第一个最有代表性的
-                markets = data[0].get('markets', [])
-                valid_markets = []
-                for m in markets[:2]: # 只取前两个
-                    p = normalize_data(m)
-                    if p: valid_markets.append(p)
-                return valid_markets
-    except: pass
-    
-    return []
+            for m in data:
+                # 简单清洗
+                title = m.get('question', '')
+                if not title: continue
+                
+                # 赔率提取
+                odds = "N/A"
+                try:
+                    outcomes = json.loads(m.get('outcomes', '[]')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+                    prices = json.loads(m.get('outcomePrices', '[]')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+                    if outcomes and prices:
+                        odds = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
+                except: pass
 
-def normalize_data(m):
-    try:
-        if m.get('closed') is True: return None
-        outcomes = json.loads(m.get('outcomes', '[]')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-        prices = json.loads(m.get('outcomePrices', '[]')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+                all_markets.append({
+                    "title": title,
+                    "slug": m.get('market_slug', ''),
+                    "volume": float(m.get('volume', 0)),
+                    "odds": odds
+                })
+    except Exception as e:
+        st.error(f"API Connection Error: {e}")
         
-        odds_display = "N/A"
-        if outcomes and prices:
-            odds_display = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
+    return all_markets
+
+def local_search(query, markets):
+    """
+    Python 本地字符串匹配搜索
+    """
+    query = query.lower().strip()
+    results = []
+    
+    # 1. 标题精准包含
+    for m in markets:
+        if query in m['title'].lower():
+            results.append(m)
             
-        return {
-            "title": m.get('question', 'Unknown'),
-            "odds": odds_display,
-            "volume": float(m.get('volume', 0)),
-            "slug": m.get('slug', '')
-        }
-    except: return None
+    # 2. 如果没结果，尝试拆词匹配 (比如搜 "SpaceX IPO", 只要同时包含 "SpaceX" 和 "IPO")
+    if not results:
+        keywords = query.split()
+        if len(keywords) > 1:
+            for m in markets:
+                if all(k in m['title'].lower() for k in keywords):
+                    results.append(m)
+    
+    # 按成交量排序
+    results.sort(key=lambda x: x['volume'], reverse=True)
+    return results[:5] # 只返回前 5 个
 
 # ================= 🤖 4. AI ANALYST =================
 
@@ -155,18 +140,18 @@ def consult_holmes(user_input, market_data, key):
         market_context = ""
         if market_data:
             m = market_data[0]
-            market_context = f"Found Market: {m['title']} | Odds: {m['odds']} | Volume: ${m['volume']:,.0f}"
+            market_context = f"Found: {m['title']} | Odds: {m['odds']} | Vol: ${m['volume']:,.0f}"
         else:
-            market_context = "No direct market found via Web Search."
+            market_context = "No direct market found in Top 1000 liquidity pool."
             
         prompt = f"""
-        Role: **Be Holmes**, The Web Detective.
+        Role: **Be Holmes**, Alpha Hunter.
         User Input: "{user_input}"
-        Web Evidence: {market_context}
+        Data Context: {market_context}
         
         Task:
-        1. **Connection:** How does the found market relate to the user's news?
-        2. **Verdict:** Based on the news, is the market Odds LOW or HIGH?
+        1. **Match Analysis:** How does the market data relate to the user's query?
+        2. **Verdict:** Based on the news, is the market OVERVALUED or UNDERVALUED?
         3. **Strategy:** Buy Yes / Buy No / Wait.
         
         Output in concise Markdown.
@@ -182,23 +167,26 @@ with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
-        if not SEARCH_AVAILABLE:
-            st.error("❌ 'duckduckgo-search' missing. Please update requirements.txt")
-        else:
-            st.caption("✅ Engine: Web Search (DuckDuckGo)")
-            
         if user_api_key: active_key = user_api_key
         elif "GEMINI_KEY" in st.secrets: active_key = st.secrets["GEMINI_KEY"]
     
     st.markdown("---")
-    st.info("💡 **Tip:** This version searches the entire web for Polymarket links.")
+    
+    # 预加载数据
+    with st.spinner("🔄 Syncing with Polymarket Chain..."):
+        market_db = fetch_all_active_markets()
+    
+    if market_db:
+        st.success(f"✅ Synced **{len(market_db)}** Active Markets")
+    else:
+        st.error("⚠️ Sync Failed")
 
 st.title("Be Holmes")
-st.caption("WEB SEARCH EDITION | V9.0")
+st.caption("BRUTE FORCE EDITION | V10.0")
 st.markdown("---")
 
-user_news = st.text_area("Input News / Event...", height=100, label_visibility="collapsed", placeholder="e.g. SpaceX IPO rumours, Trump polls...")
-ignite_btn = st.button("🔍 WEB INVESTIGATE", use_container_width=True)
+user_news = st.text_area("Input Evidence...", height=100, label_visibility="collapsed", placeholder="e.g. SpaceX")
+ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
 
 if ignite_btn:
     if not user_news:
@@ -206,23 +194,23 @@ if ignite_btn:
     elif not active_key:
         st.error("⚠️ API Key required.")
     else:
-        # 1. Web Search
-        with st.status("🌐 Scouring the Deep Web...", expanded=True) as status:
-            st.write(f"Searching site:polymarket.com for '{user_news}'...")
-            matches = search_polymarket_web(user_news)
+        # 1. 本地搜索
+        with st.status("🧠 Scanning Memory Banks...", expanded=True) as status:
+            st.write(f"Filtering {len(market_db)} markets for '{user_news}'...")
+            matches = local_search(user_news, market_db)
             
             if matches:
-                st.write(f"✅ Found {len(matches)} related markets via Search Engine.")
+                st.write(f"✅ Found {len(matches)} matches.")
             else:
-                st.warning("⚠️ No direct Polymarket links found on Google/DDG.")
+                st.warning("⚠️ No matches in Top 1000 markets.")
             
             st.write("⚖️ Holmes Analyzing...")
             report = consult_holmes(user_news, matches, active_key)
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        # 2. Results
+        # 2. 结果展示
         if matches:
-            st.markdown("### 🎯 Web Search Hits")
+            st.markdown("### 🎯 Best Matches")
             for m in matches:
                 st.markdown(f"""
                 <div class="market-card">
@@ -235,7 +223,7 @@ if ignite_btn:
                 """, unsafe_allow_html=True)
             
             slug = matches[0]['slug']
-            st.markdown(f"<a href='https://polymarket.com/event/{slug}' target='_blank'><button class='execute-btn'>🚀 GO TO MARKET</button></a>", unsafe_allow_html=True)
+            st.markdown(f"<a href='https://polymarket.com/market/{slug}' target='_blank'><button class='execute-btn'>🚀 TRADE NOW</button></a>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 📝 Holmes' Verdict")
