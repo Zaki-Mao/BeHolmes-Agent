@@ -17,88 +17,70 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. UI 设计 (明亮商务风 + 品牌红) =================
+# ================= 🎨 2. UI 设计 (强制黑字白底) =================
 st.markdown("""
 <style>
-    /* 全局背景设为干净的灰白色 */
+    /* 1. 暴力重置全局背景和文字颜色 */
     .stApp {
-        background-color: #F8F9FA;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        background-color: #F8F9FA !important;
     }
     
-    /* 隐藏顶部红条和页脚 */
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* 标题样式：品牌红 */
-    h1 {
-        color: #D62828;
-        font-weight: 800;
-        letter-spacing: -1px;
+    /* 强制所有层级的文字颜色为深灰/黑，覆盖系统深色模式设置 */
+    h1, h2, h3, h4, h5, h6, p, div, span, label, li, .stMarkdown {
+        color: #212529 !important;
     }
-    
-    /* 侧边栏样式 */
-    [data-testid="stSidebar"] {
-        background-color: #FFFFFF;
+
+    /* 2. 侧边栏专门修复 */
+    section[data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
         border-right: 1px solid #E9ECEF;
     }
-    
-    /* 输入框优化 */
+    section[data-testid="stSidebar"] * {
+        color: #212529 !important;
+    }
+
+    /* 3. 输入框文字修复 */
     .stTextInput input {
-        background-color: #FFFFFF;
-        border: 1px solid #CED4DA;
-        color: #495057;
+        background-color: #FFFFFF !important;
+        color: #212529 !important; /* 强制输入文字为黑 */
+        border: 1px solid #CED4DA !important;
         border-radius: 8px;
     }
-    .stTextInput input:focus {
-        border-color: #D62828;
-        box-shadow: 0 0 0 2px rgba(214, 40, 40, 0.2);
+    .stTextInput label {
+        color: #212529 !important;
     }
     
-    /* 核心按钮：渐变红 */
+    /* 4. 标题特别强化 (品牌红) */
+    h1 {
+        color: #D62828 !important; 
+        font-weight: 900 !important;
+    }
+    
+    /* 5. 按钮样式 */
     .stButton button {
-        background: linear-gradient(135deg, #D62828 0%, #C1121F 100%);
-        color: white;
+        background: linear-gradient(135deg, #D62828 0%, #C1121F 100%) !important;
+        color: white !important; /* 按钮文字必须是白 */
         border: none;
-        padding: 0.6rem 1rem;
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 6px rgba(214, 40, 40, 0.2);
+        font-weight: bold;
     }
-    .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(214, 40, 40, 0.3);
-        color: white;
+    .stButton button p {
+        color: white !important; /* 确保按钮里的文字是白 */
     }
     
-    /* 报告卡片风格 */
+    /* 6. 报告卡片 */
     .report-card {
         background-color: white;
-        padding: 25px;
+        padding: 30px;
         border-radius: 12px;
-        border-left: 5px solid #D62828;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        border-left: 6px solid #D62828;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.08);
         margin-top: 20px;
-        color: #333;
+        color: #333 !important;
     }
     
-    /* 标签页样式 */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 4px;
-        color: #495057;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: rgba(214, 40, 40, 0.1);
-        color: #D62828;
-    }
+    /* 隐藏多余元素 */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -183,10 +165,9 @@ def search_web_intelligence(product, market, lang_code):
     搜索引擎：利用 DuckDuckGo 抓取实时网页快照
     """
     if not SEARCH_AVAILABLE:
-        return None # 返回空，触发 AI 知识库模式
+        return None 
     
     results = []
-    # 构造侦探搜索词 (Search Queries)
     queries = [
         f"{product} {market} user reviews reddit",
         f"{product} {market} biggest complaints problems",
@@ -197,12 +178,11 @@ def search_web_intelligence(product, market, lang_code):
     try:
         with DDGS() as ddgs:
             for q in queries:
-                # 每个词抓取 2 条最相关的结果
                 r = list(ddgs.text(q, max_results=2))
                 if r:
                     for item in r:
                         results.append(f"- Source: {item['title']}\n  Snippet: {item['body']}")
-                time.sleep(0.5) # 防止请求过快
+                time.sleep(0.5) 
     except Exception as e:
         print(f"Search Error: {e}")
         return None
@@ -217,7 +197,6 @@ def generate_agent_report(product, market, search_data, api_key, lang_mode):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 根据用户选择的语言设定输出语言
         output_lang = "Chinese (Professional Business Tone)" if lang_mode == "CN" else "English (Professional Business Tone)"
         
         context_prompt = ""
@@ -268,13 +247,11 @@ def generate_agent_report(product, market, search_data, api_key, lang_mode):
 
 # --- 侧边栏 ---
 with st.sidebar:
-    # 语言切换器 (放在最显眼的位置)
     lang_choice = st.radio("Language / 语言", ["CN", "EN"], horizontal=True)
-    L = LANG[lang_choice] # 加载对应语言包
+    L = LANG[lang_choice] 
     
     st.markdown(f"## {L['sidebar_title']}")
     
-    # API Key 输入
     with st.expander(f"🔑 {L['api_label']}", expanded=True):
         st.caption(L['api_help'])
         user_api_key = st.text_input("Gemini Key", type="password")
@@ -293,7 +270,6 @@ with c1:
     st.markdown(f"**{L['subtitle']}**")
 
 with c2:
-    # 手册按钮
     if st.button(L['btn_manual']):
         @st.dialog(L['manual_title'])
         def show_manual():
@@ -302,7 +278,7 @@ with c2:
 
 st.markdown("---")
 
-# 输入表单区域
+# 输入表单
 with st.container():
     col1, col2 = st.columns(2)
     with col1:
@@ -310,21 +286,17 @@ with st.container():
     with col2:
         target_market = st.text_input(L['input_label_2'], placeholder=L['input_placeholder_2'])
 
-    # 大号开始按钮
     start_btn = st.button(L['btn_start'], use_container_width=True)
 
-# 逻辑处理
 if start_btn:
     if not user_api_key:
         st.error(L['error_no_key'])
     elif not product_name or not target_market:
         st.warning(L['error_no_input'])
     else:
-        # 1. 状态：搜索中
         with st.status(L['status_searching'], expanded=True) as status:
             st.write(f"🌐 Scouring the web for: {product_name} + {target_market}...")
             
-            # 搜索步骤
             search_results = search_web_intelligence(product_name, target_market, lang_choice)
             
             if search_results:
@@ -335,12 +307,10 @@ if start_btn:
                 else:
                     st.warning("⚠️ Web search timed out, relying on AI memory.")
             
-            # 2. 状态：分析中
             st.write("🧠 Holmes is connecting the dots...")
             report = generate_agent_report(product_name, target_market, search_results, user_api_key, lang_choice)
             
             status.update(label="✅ Investigation Complete", state="complete", expanded=False)
 
-        # 3. 结果展示
         st.markdown(f"### {L['report_title']} {product_name} @ {target_market}")
         st.markdown(f"""<div class="report-card">{report}</div>""", unsafe_allow_html=True)
