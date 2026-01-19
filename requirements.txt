@@ -2,8 +2,7 @@ streamlit
 requests
 google-generativeai
 pandas
-plotly
-sentence-transformers
-scikit-learn
+duckduckgo-search
+
 
 
