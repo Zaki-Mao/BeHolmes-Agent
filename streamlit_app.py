@@ -2,12 +2,23 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
-import pandas as pd
+import re
+
+# ================= 🔑 0. API KEY CONFIG (HARDCODED) =================
+# 你提供的 Exa Key 已内置
+EXA_API_KEY = "2b15f3e3-0787-4bdc-99c9-9e17aade05c2"
+
+# ================= 🛠️ 核心依赖检测 =================
+try:
+    from exa_py import Exa
+    EXA_AVAILABLE = True
+except ImportError:
+    EXA_AVAILABLE = False
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
-    page_title="Be Holmes | Brute Force",
-    page_icon="🕵️‍♂️",
+    page_title="Be Holmes | Exa Sniper",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -59,76 +70,109 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. THE BRUTE FORCE ENGINE =================
+# ================= 🧠 3. EXA SEARCH ENGINE =================
 
-@st.cache_data(ttl=600) # 缓存 10 分钟，避免每次点击都重新请求 API
-def fetch_all_active_markets():
+def search_with_exa(query):
     """
-    策略：直接拉取全网最热的 1000 个市场到内存里。
-    不依赖搜索接口，依赖我们自己的 Python 过滤。
+    使用内置 Key 进行 Exa 搜索
     """
-    all_markets = []
-    url = "https://gamma-api.polymarket.com/markets"
-    
-    # 抓取 Volume 最高的 1000 个市场（基本覆盖所有热点）
-    params = {
-        "limit": 1000, 
-        "closed": "false", 
-        "sort": "volume"
-    }
+    if not EXA_AVAILABLE:
+        st.error("❌ 'exa_py' library missing. Check requirements.txt")
+        return []
+
+    markets_found = []
+    seen_ids = set()
     
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        # 初始化 Exa
+        exa = Exa(EXA_API_KEY)
+        
+        # 核心搜索逻辑
+        # 1. include_domains: 锁定官网
+        # 2. neural: 开启语义理解
+        search_response = exa.search(
+            f"prediction market about {query}",
+            num_results=5,
+            type="neural",
+            include_domains=["polymarket.com"],
+            use_autoprompt=True
+        )
+        
+        for result in search_response.results:
+            url = result.url
+            # 正则提取 Slug (支持 event 和 market 两种 URL 结构)
+            match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', url)
+            
+            if match:
+                slug = match.group(1)
+                # 过滤无效页面
+                if slug not in ['profile', 'login', 'leaderboard', 'rewards'] and slug not in seen_ids:
+                    
+                    # 拿 Slug 去换数据
+                    market_data = fetch_poly_details(slug)
+                    if market_data:
+                        markets_found.extend(market_data)
+                        seen_ids.add(slug)
+                        
+    except Exception as e:
+        st.error(f"Exa Search Error: {e}")
+        
+    return markets_found
+
+def fetch_poly_details(slug):
+    """去 Polymarket 官方 API 获取实时数据"""
+    valid_markets = []
+    
+    # 策略 A: 查 Event (聚合页)
+    try:
+        url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+        resp = requests.get(url, timeout=4)
         if resp.status_code == 200:
             data = resp.json()
-            for m in data:
-                # 简单清洗
-                title = m.get('question', '')
-                if not title: continue
-                
-                # 赔率提取
-                odds = "N/A"
-                try:
-                    outcomes = json.loads(m.get('outcomes', '[]')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-                    prices = json.loads(m.get('outcomePrices', '[]')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-                    if outcomes and prices:
-                        odds = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
-                except: pass
+            if data and isinstance(data, list):
+                # Event 下通常有多个 Market，取前 2 个最有代表性的
+                for m in data[0].get('markets', [])[:2]:
+                    p = normalize_data(m)
+                    if p: valid_markets.append(p)
+                return valid_markets
+    except: pass
+    
+    # 策略 B: 查 Market (独立页)
+    try:
+        url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
+        resp = requests.get(url, timeout=4)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                for m in data:
+                    p = normalize_data(m)
+                    if p: valid_markets.append(p)
+            elif isinstance(data, dict):
+                p = normalize_data(data)
+                if p: valid_markets.append(p)
+            return valid_markets
+    except: pass
+    
+    return []
 
-                all_markets.append({
-                    "title": title,
-                    "slug": m.get('market_slug', ''),
-                    "volume": float(m.get('volume', 0)),
-                    "odds": odds
-                })
-    except Exception as e:
-        st.error(f"API Connection Error: {e}")
+def normalize_data(m):
+    try:
+        if m.get('closed') is True: return None
+        outcomes = json.loads(m.get('outcomes', '[]')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+        prices = json.loads(m.get('outcomePrices', '[]')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
         
-    return all_markets
-
-def local_search(query, markets):
-    """
-    Python 本地字符串匹配搜索
-    """
-    query = query.lower().strip()
-    results = []
-    
-    # 1. 标题精准包含
-    for m in markets:
-        if query in m['title'].lower():
-            results.append(m)
+        odds_display = "N/A"
+        if outcomes and prices:
+            # 格式化赔率：Yes: 45.2%
+            odds_display = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
             
-    # 2. 如果没结果，尝试拆词匹配 (比如搜 "SpaceX IPO", 只要同时包含 "SpaceX" 和 "IPO")
-    if not results:
-        keywords = query.split()
-        if len(keywords) > 1:
-            for m in markets:
-                if all(k in m['title'].lower() for k in keywords):
-                    results.append(m)
-    
-    # 按成交量排序
-    results.sort(key=lambda x: x['volume'], reverse=True)
-    return results[:5] # 只返回前 5 个
+        return {
+            "title": m.get('question', 'Unknown'),
+            "odds": odds_display,
+            "volume": float(m.get('volume', 0)),
+            "slug": m.get('slug', '') or m.get('market_slug', '')
+        }
+    except: return None
 
 # ================= 🤖 4. AI ANALYST =================
 
@@ -140,18 +184,18 @@ def consult_holmes(user_input, market_data, key):
         market_context = ""
         if market_data:
             m = market_data[0]
-            market_context = f"Found: {m['title']} | Odds: {m['odds']} | Vol: ${m['volume']:,.0f}"
+            market_context = f"Found Market: {m['title']} | Odds: {m['odds']} | Vol: ${m['volume']:,.0f}"
         else:
-            market_context = "No direct market found in Top 1000 liquidity pool."
+            market_context = "No direct market found."
             
         prompt = f"""
-        Role: **Be Holmes**, Alpha Hunter.
+        Role: **Be Holmes**, The Semantic Sniper.
         User Input: "{user_input}"
-        Data Context: {market_context}
+        Exa Evidence: {market_context}
         
         Task:
-        1. **Match Analysis:** How does the market data relate to the user's query?
-        2. **Verdict:** Based on the news, is the market OVERVALUED or UNDERVALUED?
+        1. **Semantic Link:** Explain the connection between the user's input and the market found.
+        2. **Verdict:** Based on the news, is the market Odds OVERVALUED or UNDERVALUED?
         3. **Strategy:** Buy Yes / Buy No / Wait.
         
         Output in concise Markdown.
@@ -161,56 +205,56 @@ def consult_holmes(user_input, market_data, key):
 
 # ================= 🖥️ 5. MAIN INTERFACE =================
 
-active_key = None
+active_gemini_key = None
 
 with st.sidebar:
     st.markdown("## 💼 DETECTIVE'S TOOLKIT")
-    with st.expander("🔑 API Key Settings", expanded=True):
-        user_api_key = st.text_input("Gemini Key", type="password")
-        if user_api_key: active_key = user_api_key
-        elif "GEMINI_KEY" in st.secrets: active_key = st.secrets["GEMINI_KEY"]
     
+    # 只需输入 Gemini Key，Exa Key 已内置
+    with st.expander("🔑 Gemini Key (Required)", expanded=True):
+        gemini_input = st.text_input("Gemini Key", type="password")
+        if gemini_input: active_gemini_key = gemini_input
+        elif "GEMINI_KEY" in st.secrets: active_gemini_key = st.secrets["GEMINI_KEY"]
+            
     st.markdown("---")
     
-    # 预加载数据
-    with st.spinner("🔄 Syncing with Polymarket Chain..."):
-        market_db = fetch_all_active_markets()
-    
-    if market_db:
-        st.success(f"✅ Synced **{len(market_db)}** Active Markets")
+    if EXA_AVAILABLE:
+        st.success(f"✅ Exa Sniper: Active")
     else:
-        st.error("⚠️ Sync Failed")
+        st.error("❌ 'exa_py' Missing")
 
 st.title("Be Holmes")
-st.caption("BRUTE FORCE EDITION | V10.0")
+st.caption("EXA SNIPER EDITION | V12.0")
 st.markdown("---")
 
-user_news = st.text_area("Input Evidence...", height=100, label_visibility="collapsed", placeholder="e.g. SpaceX")
-ignite_btn = st.button("🔍 INVESTIGATE", use_container_width=True)
+user_news = st.text_area("Input Evidence...", height=100, label_visibility="collapsed", placeholder="e.g. Will Musk launch Starship soon?")
+ignite_btn = st.button("🔍 EXA SEARCH", use_container_width=True)
 
 if ignite_btn:
     if not user_news:
-        st.warning("⚠️ Input required.")
-    elif not active_key:
-        st.error("⚠️ API Key required.")
+        st.warning("⚠️ Evidence required.")
+    elif not active_gemini_key:
+        st.error("⚠️ Gemini API Key required.")
     else:
-        # 1. 本地搜索
-        with st.status("🧠 Scanning Memory Banks...", expanded=True) as status:
-            st.write(f"Filtering {len(market_db)} markets for '{user_news}'...")
-            matches = local_search(user_news, market_db)
+        # 1. Exa Search
+        with st.status("🎯 Exa Sniper Locking Target...", expanded=True) as status:
+            st.write(f"Scanning polymarket.com via Exa.ai for '{user_news}'...")
+            
+            # 使用硬编码的 Key 进行搜索
+            matches = search_with_exa(user_news)
             
             if matches:
-                st.write(f"✅ Found {len(matches)} matches.")
+                st.write(f"✅ Hit! Found {len(matches)} markets.")
             else:
-                st.warning("⚠️ No matches in Top 1000 markets.")
+                st.warning("⚠️ No markets found via Exa.")
             
             st.write("⚖️ Holmes Analyzing...")
-            report = consult_holmes(user_news, matches, active_key)
-            status.update(label="✅ Investigation Complete", state="complete", expanded=False)
+            report = consult_holmes(user_news, matches, active_gemini_key)
+            status.update(label="✅ Mission Complete", state="complete", expanded=False)
 
-        # 2. 结果展示
+        # 2. Results
         if matches:
-            st.markdown("### 🎯 Best Matches")
+            st.markdown("### 🎯 Sniper Hits")
             for m in matches:
                 st.markdown(f"""
                 <div class="market-card">
@@ -222,8 +266,10 @@ if ignite_btn:
                 </div>
                 """, unsafe_allow_html=True)
             
+            # 按钮跳转
             slug = matches[0]['slug']
-            st.markdown(f"<a href='https://polymarket.com/market/{slug}' target='_blank'><button class='execute-btn'>🚀 TRADE NOW</button></a>", unsafe_allow_html=True)
+            link = f"https://polymarket.com/event/{slug}" 
+            st.markdown(f"<a href='{link}' target='_blank'><button class='execute-btn'>🚀 EXECUTE TRADE</button></a>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 📝 Holmes' Verdict")
