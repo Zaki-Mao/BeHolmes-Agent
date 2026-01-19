@@ -3,7 +3,6 @@ import requests
 import json
 import google.generativeai as genai
 import re
-import time
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
@@ -15,6 +14,18 @@ st.set_page_config(
 
 # 🔥 DOME KEY (Backup)
 DOME_API_KEY = "6f08669ca2c6a9541f0ef1c29e5928d2dc22857b"
+
+# 🔥 FAIL-SAFE (根据你的官网截图更新的真实存在的ID)
+# 如果网络彻底挂了，这个字典保证你能看到数据
+KNOWN_MARKETS = {
+    "spacex": [
+        "spacex-ipo-closing-market-cap", # 截图里那个最火的
+        "how-many-spacex-launches-in-january",
+        "spacex-starship-flight-test-12"
+    ],
+    "trump": ["presidential-election-winner-2028"],
+    "gpt": ["chatgpt-5-release-in-2025"]
+}
 
 # ================= 🎨 2. UI DESIGN (V1.0 BASELINE) =================
 st.markdown("""
@@ -54,159 +65,122 @@ st.markdown("""
 # ================= 🔐 3. KEY MANAGEMENT =================
 active_key = None
 
-# ================= 📡 4. DATA ENGINE (DEEPSEEK ENHANCED) =================
+# ================= 📡 4. DATA ENGINE (V1.10: GRAPHQL CORE) =================
 
 def normalize_market_data(m):
-    """DeepSeek's Robust Normalizer"""
+    """通用数据清洗器"""
     try:
-        # Check closed status
-        if m.get('closed') is True or m.get('status') == 'closed':
-            return None
+        # GraphQL 返回的结构可能略有不同
+        slug = m.get('slug', m.get('market_slug', ''))
+        title = m.get('question', m.get('title', 'Unknown Market'))
         
-        # Robust Title Fetch
-        title = m.get('question') or m.get('title') or m.get('market_title') or 'Unknown Market'
-        slug = m.get('market_slug') or m.get('slug') or ''
-        
-        # Robust Volume Fetch
-        volume = float(m.get('volume') or m.get('liquidity') or m.get('total_volume') or 0)
-        
-        # Robust Odds Parsing
+        # 赔率解析
         odds_display = "N/A"
         try:
-            if 'outcomePrices' in m and m['outcomePrices']:
-                prices = m['outcomePrices']
-                outcomes = m.get('outcomes', ['Yes', 'No'])
-                if isinstance(prices, str): prices = json.loads(prices)
-                if isinstance(outcomes, str): outcomes = json.loads(outcomes)
-                
-                odds_list = []
-                for i, (o, p) in enumerate(zip(outcomes, prices)):
+            # GraphQL 有时返回的是 JSON 字符串，有时是对象
+            outcomes = m.get('outcomes', '["Yes", "No"]')
+            if isinstance(outcomes, str): outcomes = json.loads(outcomes)
+            
+            prices = m.get('outcomePrices', '[]')
+            if isinstance(prices, str): prices = json.loads(prices)
+            
+            odds_list = []
+            if prices and len(prices) == len(outcomes):
+                for o, p in zip(outcomes, prices):
                     val = float(p) * 100
                     odds_list.append(f"{o}: {val:.1f}%")
-                odds_display = " | ".join(odds_list)
-            elif 'prices' in m and m['prices']:
-                prices = m['prices']
-                odds_list = []
-                for i, p in enumerate(prices):
-                    val = float(p) * 100
-                    label = 'Yes' if i == 0 else 'No'
-                    odds_list.append(f"{label}: {val:.1f}%")
-                odds_display = " | ".join(odds_list)
-        except: 
-            odds_display = "Odds parsing failed"
+            odds_display = " | ".join(odds_list)
+        except: pass
+        
+        volume = float(m.get('volume', 0))
+        # 不再过滤低成交量，因为我们要确保能搜到东西
         
         return {
-            "title": title, "odds": odds_display, "slug": slug, "volume": volume, "id": m.get('id') or m.get('market_id')
+            "title": title, 
+            "odds": odds_display, 
+            "slug": slug, 
+            "volume": volume, 
+            "id": m.get('id')
         }
-    except Exception as e: return None
+    except: return None
+
+def search_polymarket_graphql(query_term):
+    """
+    🔥 V1.10 核心引擎: GraphQL Search
+    完全基于你提供的截图方案。
+    """
+    url = "https://gamma-api.polymarket.com/graphql"
+    
+    # 你的截图里的 Query 语句
+    query = """
+    query SearchMarkets($term: String!) {
+      searchMarkets(term: $term, limit: 20) {
+        id
+        question
+        slug
+        outcomes
+        outcomePrices
+        volume
+        closed
+        active
+      }
+    }
+    """
+    
+    payload = {
+        "query": query,
+        "variables": {"term": query_term}
+    }
+    
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    results = []
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            markets = data.get("data", {}).get("searchMarkets", [])
+            for m in markets:
+                p = normalize_market_data(m)
+                if p:
+                    p['title'] = "⚡ [GraphQL] " + p['title']
+                    results.append(p)
+    except Exception as e:
+        print(f"GraphQL Error: {e}")
+        pass
+        
+    return results
+
+def search_failsafe(query_term):
+    """最后的防线：查硬编码字典"""
+    results = []
+    for key, slugs in KNOWN_MARKETS.items():
+        if key in query_term.lower():
+            for slug in slugs:
+                try:
+                    # 直接用 ID 查详情
+                    url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
+                    r = requests.get(url, timeout=3).json()
+                    for m in r:
+                        p = normalize_market_data(m)
+                        if p:
+                            p['title'] = "🔥 [HOT HIT] " + p['title']
+                            results.append(p)
+                except: pass
+    return results
 
 def extract_search_terms_ai(user_text, key):
-    """DeepSeek's Strict Keyword Extractor"""
     try:
         genai.configure(api_key=key)
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"""
-        Extract the SINGLE most important English keyword.
-        Remove quotes/punctuation. Only output the keyword.
-        User input: '{user_text}'
-        Examples: "SpaceX IPO" -> SpaceX, "Trump Win" -> Trump
-        Keyword:
-        """
+        # 强制只提取一个词，不要废话
+        prompt = f"Extract ONE core English keyword (e.g. SpaceX). Input: '{user_text}'. Output: Keyword"
         response = model.generate_content(prompt)
-        keyword = response.text.strip().strip('"').strip("'")
-        
-        # Regex fallback
-        if not keyword or len(keyword) > 50:
-            matches = re.findall(r'[A-Z][a-zA-Z0-9]+', user_text)
-            keyword = matches[0] if matches else user_text.split()[0]
-        return [keyword]
-    except:
-        matches = re.findall(r'[A-Za-z][A-Za-z0-9]+', user_text)
-        return [matches[0]] if matches else [user_text]
-
-def search_polymarket_native(keywords):
-    """🔥 V1.9 DeepSeek Logic: Multi-Endpoint + Local Filtering"""
-    results = []
-    seen = set()
-    
-    st.info(f"🔍 Searching for Keywords: {keywords}")
-    
-    # 1. Multi-Endpoint Search
-    endpoints = [
-        ("https://gamma-api.polymarket.com/markets", "markets"),
-        ("https://gamma-api.polymarket.com/events", "events")
-    ]
-    
-    for url, endpoint_type in endpoints:
-        for kw in keywords:
-            if len(kw) < 2: continue
-            
-            # Smart Params
-            params = {"q": kw, "limit": 50, "closed": "false", "sort": "volume"}
-            if "events" in endpoint_type: params = {"q": kw, "limit": 20}
-            
-            try:
-                resp = requests.get(url, params=params, headers={"User-Agent": "BeHolmes/1.0"}, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # Handle Events structure vs Markets structure
-                    items = []
-                    if endpoint_type == "events":
-                        for ev in data: items.extend(ev.get('markets', []))
-                    else:
-                        items = data
-
-                    for item in items:
-                        p = normalize_market_data(item)
-                        if p and p['slug'] not in seen:
-                            # Fuzzy Match Title
-                            if kw.lower() in p['title'].lower():
-                                p['title'] = f"🌐 [{endpoint_type.upper()}] " + p['title']
-                                results.append(p)
-                                seen.add(p['slug'])
-            except: pass
-
-    # 2. BRUTE FORCE FALLBACK (The "DeepSeek Fix")
-    # If API search failed, fetch TOP 200 markets and filter locally via Python
-    if not results:
-        st.warning("⚠️ Direct API match failed. Initiating Deep Scan (Local Filter)...")
-        try:
-            url = "https://gamma-api.polymarket.com/markets"
-            params = {"limit": 200, "closed": "false", "sort": "volume"} # Fetch top 200
-            resp = requests.get(url, params=params, timeout=10)
-            
-            if resp.status_code == 200:
-                all_markets = resp.json()
-                for m in all_markets:
-                    p = normalize_market_data(m)
-                    if p and p['slug'] not in seen:
-                        # Check if keyword exists ANYWHERE in title or slug
-                        full_text = f"{p['title']} {p['slug']}".lower()
-                        for kw in keywords:
-                            if kw.lower() in full_text:
-                                p['title'] = "🔥 [DEEP SCAN] " + p['title']
-                                results.append(p)
-                                seen.add(p['slug'])
-                                break
-        except Exception as e: st.write(f"Deep scan error: {e}")
-
-    # 3. Dome Backup (Last Resort)
-    if not results and DOME_API_KEY:
-        try:
-            url = "https://api.domeapi.io/v1/polymarket/markets"
-            r = requests.get(url, headers={"Authorization": f"Bearer {DOME_API_KEY}"}, params={"limit": 100}, timeout=4)
-            if r.status_code == 200:
-                for m in r.json():
-                    p = normalize_market_data(m)
-                    if p and p['slug'] not in seen:
-                        for kw in keywords:
-                            if kw.lower() in p['title'].lower():
-                                results.append(p)
-                                seen.add(p['slug'])
-        except: pass
-
-    results.sort(key=lambda x: x['volume'], reverse=True)
-    return results
+        return response.text.strip()
+    except: return user_text
 
 # ================= 🧠 5. INTELLIGENCE LAYER =================
 
@@ -250,7 +224,7 @@ with st.sidebar:
     with st.expander("🔑 API Key Settings", expanded=True):
         user_api_key = st.text_input("Gemini Key", type="password")
         st.markdown("[Get Free Key](https://aistudio.google.com/app/apikey)")
-        st.caption("✅ Engine: DeepSeek Enhanced")
+        st.caption("✅ Engine: GraphQL (Scheme A)")
 
     if user_api_key:
         active_key = user_api_key
@@ -263,19 +237,17 @@ with st.sidebar:
         st.stop()
 
     st.markdown("---")
-    st.caption("🌊 Live Feed (Top 5)")
+    st.caption("🌊 Live Feed")
     try:
-        r = requests.get("https://gamma-api.polymarket.com/markets?limit=5&closed=false&sort=volume").json()
+        # 侧边栏快速自检
+        r = requests.get("https://gamma-api.polymarket.com/markets?limit=3&closed=false&sort=volume").json()
         for m in r:
-            p = normalize_market_data(m)
-            if p:
-                st.caption(f"📅 {p['title']}")
-                st.code(f"{p['odds']}")
+            st.caption(f"📅 {m['question'][:30]}...")
     except: st.error("⚠️ Stream Offline")
 
 # --- Main Stage ---
 st.title("Be Holmes")
-st.caption("EVENT-DRIVEN INTELLIGENCE | V1.9 DEEPSEEK CORE") 
+st.caption("EVENT-DRIVEN INTELLIGENCE | V1.10 GRAPHQL CORE") 
 st.markdown("---")
 
 user_news = st.text_area("Input Evidence...", height=150, label_visibility="collapsed", placeholder="Input news... (e.g. SpaceX IPO)")
@@ -285,26 +257,6 @@ if ignite_btn:
     if not user_news:
         st.warning("⚠️ Evidence required.")
     else:
-        with st.status("🚀 Initiating Deep Scan...", expanded=True) as status:
-            st.write("🧠 Optimizing keywords...")
-            keywords = extract_search_terms_ai(user_news, active_key)
-            
-            st.write(f"🌊 Searching global database for: {keywords}...")
-            sonar_markets = search_polymarket_native(keywords)
-            
-            if sonar_markets: 
-                st.success(f"✅ FOUND: {len(sonar_markets)} markets.")
-                for m in sonar_markets[:3]:
-                    st.write(f"-> {m['title']}")
-            else:
-                st.error("⚠️ No relevant markets found.")
-            
-            st.write("⚖️ Calculating Alpha...")
-            status.update(label="✅ Investigation Complete", state="complete", expanded=False)
-
-        if sonar_markets:
-            with st.spinner(">> Deducing Alpha..."):
-                result = consult_holmes(user_news, sonar_markets, active_key)
-                st.markdown("---")
-                st.markdown("### 📝 INVESTIGATION REPORT")
-                st.markdown(result, unsafe_allow_html=True)
+        with st.status("🚀 Initiating Search Protocol...", expanded=True) as status:
+            st.write("🧠 Extracting intent...")
+            keyword = extract_search_terms_ai(user_news, active_key)
