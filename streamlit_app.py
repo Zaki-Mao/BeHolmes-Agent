@@ -33,17 +33,26 @@ st.set_page_config(
     page_title="Be Holmes | Alpha Terminal",
     page_icon="🕵️‍♂️",
     layout="wide",
-    initial_sidebar_state="expanded" # 尝试默认展开，但手机端通常会强制收起
+    initial_sidebar_state="expanded" # 尝试默认展开
 )
 
-# ================= 🎨 2. UI THEME (MOBILE PRO) =================
+# ================= 🎨 2. UI THEME (FIXED SIDEBAR) =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
     
     .stApp { background-color: #050505; font-family: 'Inter', sans-serif; }
+    
+    /* 🔥 关键修复：不要隐藏 header，否则侧边栏开关也会消失！ */
+    /* header { visibility: hidden; }  <-- 删掉这行 */
+    
+    /* 只隐藏右上角的菜单 (Deploy/Settings)，保留左上角的侧边栏箭头 */
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
-    header { visibility: hidden; }
+    [data-testid="stDecoration"] { visibility: hidden; }
+    
+    /* 让顶部导航栏背景透明，融合进黑色背景 */
+    header[data-testid="stHeader"] { background-color: rgba(0,0,0,0); }
+    
     footer { visibility: hidden; }
     
     /* 侧边栏 */
@@ -77,6 +86,16 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     
+    /* 侧边栏 Manual 按钮 (低调灰) */
+    [data-testid="stSidebar"] .stButton button {
+        background: #111 !important; border: 1px solid #333 !important;
+        color: #888 !important; font-size: 0.75rem !important; width: 100%;
+        margin-top: 20px;
+    }
+    [data-testid="stSidebar"] .stButton button:hover {
+        border-color: #FF4B4B !important; color: #FF4B4B !important;
+    }
+    
     /* 侧边栏 Ticker */
     .ticker-item { padding: 12px 0; border-bottom: 1px solid #1A1A1A; font-size: 0.85rem; }
     .ticker-title { color: #CCC; margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;}
@@ -96,13 +115,9 @@ st.markdown("""
         border-radius: 12px; margin-top: 20px; color: #CCC; line-height: 1.6;
     }
     
-    /* 底部 Manual 样式优化 */
+    /* 底部 Expander 样式 */
     .streamlit-expanderHeader {
-        background-color: #0A0A0A !important;
-        color: #888 !important;
-        border: 1px solid #222 !important;
-        border-radius: 6px !important;
-        font-size: 0.9rem !important;
+        background-color: #0A0A0A !important; color: #666 !important; border: 1px solid #222 !important;
     }
     
     /* 手机端适配 */
@@ -197,6 +212,7 @@ def consult_holmes(user_input, market_data):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         lang = detect_language(user_input)
+        
         if lang == "CHINESE":
             lang_instruction = "IMPORTANT: Respond in **CHINESE (中文)**."
             role_desc = "你现在是 **Be Holmes**，一位极度理性、只相信数据和博弈论的顶级宏观对冲基金经理。"
@@ -239,7 +255,42 @@ def consult_holmes(user_input, market_data):
 
 # ================= 🖥️ 5. MAIN INTERFACE =================
 
-# --- A. 侧边栏：实时行情 (手机上默认折叠) ---
+# --- Manual 弹窗逻辑 (定义在前面以便复用) ---
+@st.dialog("Be Holmes Protocol", width="large")
+def show_manual():
+    lang_mode = st.radio("Display Language", ["中文", "English"], horizontal=True)
+    st.markdown("---")
+    
+    st.markdown("""
+    <div style="background:#111; padding:15px; border-radius:8px; border:1px solid #333; margin-bottom:20px;">
+        <strong style="color:#FF4B4B;">⚡ CORE ENGINE POWERED BY</strong>
+        <h3 style="margin:5px 0; color:white;">Exa.ai Neural Search</h3>
+        <p style="color:#666; font-size:0.8rem;">State-of-the-art Embeddings for cross-lingual intent mapping.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if lang_mode == "中文":
+        st.markdown("""
+        **1. 架构 (Architecture)**
+        Be Holmes 是基于 **RAG** 的情报决策终端。
+        * **语义层:** Exa.ai 将中文情报映射为链上实体。
+        * **推理层:** Gemini Pro 计算贝叶斯预期差。
+        **2. 操作 (Operation)**
+        * **注入情报:** 输入任何非结构化文本。
+        * **解码策略:** 系统识别“已定价”风险并输出 Buy/Wait 信号。
+        """)
+    else:
+        st.markdown("""
+        **1. Architecture**
+        **RAG-based** Intelligence Terminal.
+        * **Semantic Layer:** Exa.ai maps intent to assets.
+        * **Reasoning:** Gemini Pro calculates Expectation Gaps.
+        **2. Operation**
+        * **Inject Intel:** Input unstructured text.
+        * **Decode:** System identifies "Priced-in" risks.
+        """)
+
+# --- A. 侧边栏：实时行情 + 底部 Manual ---
 with st.sidebar:
     st.markdown("### 📡 LIVE TICKER")
     if KEYS_LOADED:
@@ -259,17 +310,19 @@ with st.sidebar:
         except: st.warning("Connecting...")
     else:
         st.error("Keys Missing")
-    
-    st.markdown("---")
-    st.caption("ℹ️ Live feed works best on Desktop.")
+
+    # 底部 Manual 按钮 (侧边栏版本)
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    if st.button("📘 PROTOCOL MANUAL"):
+        show_manual()
 
 # --- B. 主界面 ---
 st.title("Be Holmes")
-st.caption("THE GENIUS TRADER | V2.3 MOBILE HYBRID")
+st.caption("THE GENIUS TRADER | V2.4 SIDEBAR FIXED")
 
-# 增加一个状态栏，提示手机用户侧边栏有东西
+# 状态栏
 if KEYS_LOADED:
-    st.markdown('<p class="status-bar">🟢 System Online | 📡 <span style="color:#444;">Live Feed available in Sidebar (Top Left)</span></p>', unsafe_allow_html=True)
+    st.markdown('<p class="status-bar">🟢 System Online | 📡 <span style="color:#444;">Live Feed in Sidebar (Top Left >)</span></p>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 user_news = st.text_area("Intelligence Injection...", height=120, placeholder="Paste Intel here... (e.g. 特朗普宣布2月1日加征关税 / SpaceX IPO)")
@@ -319,44 +372,9 @@ if ignite_btn:
         st.markdown("### 🧠 Strategic Report")
         st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
 
-# --- C. 底部 Manual (手机/电脑通用) ---
-# 移出 sidebar，放在主页面最底部，使用折叠栏，既不抢戏，手机上也能滑到
+# --- C. 底部 Manual (备用入口，方便手机端) ---
 st.markdown("<br><br><br>", unsafe_allow_html=True)
-st.markdown("---")
-
-with st.expander("📘 OPERATIONAL PROTOCOL (MANUAL)"):
-    st.markdown("""
-    <div style="background:#111; padding:15px; border-radius:8px; border:1px solid #333; margin-bottom:20px;">
-        <strong style="color:#FF4B4B;">⚡ CORE ENGINE POWERED BY</strong>
-        <h3 style="margin:5px 0; color:white;">Exa.ai Neural Search</h3>
-        <p style="color:#666; font-size:0.8rem;">
-            State-of-the-art Embeddings for cross-lingual intent mapping.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("#### 🇨🇳 中文指南")
-        st.markdown("""
-        **1. 架构 (Architecture)**
-        Be Holmes 是基于 **RAG** 的情报决策终端。
-        * **语义层:** Exa.ai 将中文情报映射为链上实体。
-        * **推理层:** Gemini Pro 计算贝叶斯预期差。
-
-        **2. 操作 (Operation)**
-        * **注入情报:** 输入任何非结构化文本。
-        * **解码策略:** 系统识别“已定价”风险并输出 Buy/Wait 信号。
-        """)
-    with col_b:
-        st.markdown("#### 🇺🇸 Protocol")
-        st.markdown("""
-        **1. Architecture**
-        **RAG-based** Intelligence Terminal.
-        * **Semantic Layer:** Exa.ai maps intent to assets.
-        * **Reasoning:** Gemini Pro calculates Expectation Gaps.
-
-        **2. Operation**
-        * **Inject Intel:** Input unstructured text.
-        * **Decode:** System identifies "Priced-in" risks and signals Buy/Wait.
-        """)
+with st.expander("📘 PROTOCOL MANUAL (MOBILE ACCESS)"):
+    # 为了复用逻辑，这里简单渲染一些核心信息，或者再次调用弹窗
+    if st.button("OPEN MANUAL DIALOG"):
+        show_manual()
