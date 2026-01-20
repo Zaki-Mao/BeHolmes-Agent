@@ -640,74 +640,95 @@ with st.expander("Operational Protocol & System Architecture"):
     </div>
     """, unsafe_allow_html=True)
 
-# ================= ⚡ 底部实时滚动新闻条 (NEWS TICKER) =================
+# ================= ⚡ 底部实时滚动新闻条 (REAL-TIME CRYPTOPANIC TICKER) =================
 
-# 1. 定义模拟新闻数据 (实际项目中这里可以接 API)
-ticker_news = [
-    "⚡ BREAKING: Bitcoin surges past $72,000 on ETF inflows.",
-    "📈 POLYMARKET: 'Trump 2024' volume hits all-time high of $100M.",
-    "🚨 FED ALERT: Powell signals rate cuts likely in Q3.",
-    "🌍 GEOPOLITICS: Tensions rise in Middle East, oil prices up 2%.",
-    "🤖 AI NEWS: OpenAI releases GPT-5 preview for developers.",
-    "📉 MARKET: S&P 500 closes slightly lower ahead of CPI data."
-]
+@st.cache_data(ttl=300) # 设置5分钟缓存，避免频繁消耗API额度
+def fetch_ticker_news():
+    # 1. 尝试从 Secrets 获取 API Key
+    api_key = st.secrets.get("CRYPTOPANIC_API_KEY", None)
+    
+    # 如果没有 Key，或者请求失败，使用备用模拟数据防止报错
+    fallback_news = [
+        "⚠️ API Key Missing: Please configure CRYPTOPANIC_API_KEY in secrets.",
+        "⚡ SYSTEM: Connecting to decentralized intelligence grid...",
+        "📈 MARKET: Waiting for live data stream."
+    ]
+    
+    if not api_key:
+        return fallback_news
 
-# 将新闻拼接成一个长字符串，中间用原本的间隔符隔开
-news_string = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(ticker_news)
+    try:
+        # 2. 请求 CryptoPanic API (获取 Rising/Hot 新闻)
+        # filter=rising 表示获取当前正在变热的新闻
+        url = f"https://cryptopanic.com/api/v1/posts/?auth_token={api_key}&public=true&filter=rising&kind=news"
+        resp = requests.get(url, timeout=5)
+        data = resp.json()
+        
+        news_items = []
+        if "results" in data:
+            for item in data["results"][:10]: # 只取前10条
+                # 根据货币代码添加一点装饰 (可选)
+                currencies = item.get("currencies", [])
+                curr_tag = f"[{currencies[0]['code']}] " if currencies else "⚡ "
+                title = item["title"]
+                news_items.append(f"{curr_tag}{title}")
+        
+        return news_items if news_items else fallback_news
 
-# 2. 注入 CSS 和 HTML
-# 使用 position: fixed; bottom: 0; 让它永远吸附在屏幕最下方
+    except Exception as e:
+        # print(f"News Error: {e}") # Debug
+        return [
+            "⚡ NETWORK STATUS: Re-routing via neural nodes...",
+            "📉 DATA: Retrying connection to CryptoPanic feed..."
+        ]
+
+# 获取新闻数据
+news_list = fetch_ticker_news()
+
+# 拼接字符串
+ticker_text = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(news_list)
+
+# 注入 CSS 和 HTML (保持原样，无需修改样式)
 st.markdown(f"""
 <style>
-    /* 底部容器样式 */
     .news-ticker-container {{
         position: fixed;
         bottom: 0;
         left: 0;
         width: 100%;
-        background-color: #0f172a; /* 深蓝黑色背景 */
-        border-top: 1px solid #dc2626; /* 顶部红线 */
+        background-color: #0f172a;
+        border-top: 1px solid #dc2626;
         color: #e2e8f0;
         font-family: 'Inter', monospace;
         font-size: 0.9rem;
         padding: 8px 0;
-        z-index: 9999; /* 保证在最上层 */
+        z-index: 9999;
         overflow: hidden;
         white-space: nowrap;
         box-shadow: 0 -4px 15px rgba(0,0,0,0.5);
     }}
-
-    /* 滚动动画定义 */
-    .ticker-wrap {{
-        width: 100%;
-        overflow: hidden;
-    }}
-    
+    .ticker-wrap {{ width: 100%; overflow: hidden; }}
     .ticker-move {{
         display: inline-block;
         white-space: nowrap;
-        animation: ticker 30s linear infinite; /* 30秒滚完一圈，无限循环 */
+        animation: ticker 60s linear infinite; /* 调整为60s，让新闻多的时候滚慢点 */
     }}
-    
     @keyframes ticker {{
         0% {{ transform: translate3d(100%, 0, 0); }}
         100% {{ transform: translate3d(-100%, 0, 0); }}
     }}
-    
-    /* 鼠标放上去暂停，方便阅读 */
-    .ticker-wrap:hover .ticker-move {{
-        animation-play-state: paused;
-    }}
+    .ticker-wrap:hover .ticker-move {{ animation-play-state: paused; }}
 </style>
 
 <div class="news-ticker-container">
     <div class="ticker-wrap">
         <div class="ticker-move">
-            {news_string}
+            {ticker_text}
         </div>
     </div>
 </div>
-<br><br><br> """, unsafe_allow_html=True)
+<br><br><br>
+""", unsafe_allow_html=True)
 
 
 
