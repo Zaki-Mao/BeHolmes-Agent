@@ -79,7 +79,7 @@ st.markdown("""
         font-weight: 400;
     }
 
-    /* 4. Input Field Styling */
+    /* 4. Input Field Styling (已修复：左对齐 + 字体优化) */
     div[data-testid="stVerticalBlock"] > div {
         display: flex;
         flex-direction: column;
@@ -92,9 +92,13 @@ st.markdown("""
         color: #ffffff !important;
         border: 1px solid #374151 !important;
         border-radius: 16px !important;
-        padding: 15px 25px !important;
-        font-size: 1.1rem !important;
-        text-align: center;
+        
+        /* 修改点在这里：左对齐，调整内边距，调整字号 */
+        padding: 15px 20px !important; 
+        font-size: 1rem !important; /* 从 1.1rem 改为 1rem */
+        text-align: left !important; /* 从 center 改为 left */
+        line-height: 1.6 !important; /* 增加行高，让中文更易读 */
+        
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
     }
@@ -143,9 +147,7 @@ st.markdown("""
         backdrop-filter: blur(8px);
     }
 
-    /* =================================================================
-       2. BOTTOM GRID STYLING (3x4 Layout + Clickable)
-       ================================================================= */
+    /* Bottom Grid Styling */
     .top10-container {
         width: 100%;
         max-width: 1200px;
@@ -162,20 +164,15 @@ st.markdown("""
         padding-left: 10px;
     }
     
-    /* 3 Columns Layout */
     .top10-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 15px;
     }
 
-    /* Responsive */
     @media (max-width: 1000px) { .top10-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 600px) { .top10-grid { grid-template-columns: 1fr; } }
 
-    /* Card Styles 
-       UPDATED: Added text-decoration and color:inherit for <a> tag support 
-    */
     .market-item {
         background: rgba(17, 24, 39, 0.6);
         border: 1px solid #374151;
@@ -188,7 +185,6 @@ st.markdown("""
         backdrop-filter: blur(5px);
         min-height: 110px;
         
-        /* New properties for Link behavior */
         text-decoration: none !important;
         color: inherit !important;
         cursor: pointer;
@@ -495,3 +491,4 @@ with st.expander("Explore Protocol & Credits"):
         Data source: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
