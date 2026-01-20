@@ -253,52 +253,68 @@ def search_with_exa(query):
                         seen_ids.add(slug)
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
-
-# 缓存 Top 10 数据 - 修复版
+# 缓存 Top 10 数据 - 修复重复问题版 (使用 /events 端点)
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
-        # 使用 Events 接口通常比 Markets 更稳定用于获取热门列表
-        url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
+        # 1. 核心修改：将端点改为 /events，这样获取的是聚合后的"话题"，而不是单个"选项"
+        url = "https://gamma-api.polymarket.com/events?limit=10&sort=volume&closed=false"
         resp = requests.get(url, timeout=5).json()
         
         markets = []
-        # 确保 resp 是列表
+        
         if isinstance(resp, list):
-            for m in resp:
+            for event in resp:
                 try:
-                    # ⚠️ 关键修复：安全解析 outcomes 和 prices
-                    # API 有时返回字符串 JSON，有时直接返回 List
+                    # 获取事件标题
+                    title = event.get('title', 'Unknown Event')
+                    
+                    # 获取该事件下的市场列表 (markets)
+                    event_markets = event.get('markets', [])
+                    if not event_markets or not isinstance(event_markets, list):
+                        continue
+
+                    # 2. 策略：我们取该事件下的第一个市场作为代表来显示赔率
+                    # 对于二元问题(Yes/No)，通常只有一个市场。
+                    # 对于多选问题，第一个通常是当前最热门或默认选项。
+                    m = event_markets[0]
+                    
+                    # 解析 Outcomes 和 Prices
                     outcomes = m.get('outcomes')
-                    if isinstance(outcomes, str):
-                        outcomes = json.loads(outcomes)
+                    if isinstance(outcomes, str): outcomes = json.loads(outcomes)
                         
                     prices = m.get('outcomePrices')
-                    if isinstance(prices, str):
-                        prices = json.loads(prices)
+                    if isinstance(prices, str): prices = json.loads(prices)
                     
-                    # 确保解析后是列表且不为空
-                    if not outcomes or not isinstance(outcomes, list): continue
-                    if not prices or not isinstance(prices, list): continue
+                    if not outcomes or not prices: continue
 
+                    # 解析 Yes/No 价格
                     yes_price = 0
                     no_price = 0
                     
-                    if len(outcomes) >= 2 and len(prices) >= 2:
+                    # 确保数据长度足够
+                    if len(prices) >= 2:
                         yes_price = int(float(prices[0]) * 100)
                         no_price = int(float(prices[1]) * 100)
-                    
+                    elif len(prices) == 1:
+                        # 某些特殊市场可能只有一个价格
+                        yes_price = int(float(prices[0]) * 100)
+                        no_price = 100 - yes_price
+
                     markets.append({
-                        "title": m.get('question', 'Unknown Market'),
+                        "title": title,
                         "yes": yes_price,
                         "no": no_price,
-                        "slug": m.get('slug', '')
+                        "slug": event.get('slug', '')
                     })
-                except Exception:
+                except Exception as e:
+                    # print(f"Error parsing event: {e}") # Debug only
                     continue
         return markets
-    except Exception:
+    except Exception as e:
+        # print(f"API Error: {e}") # Debug only
         return []
+
 
 def fetch_poly_details(slug):
     valid_markets = []
@@ -476,3 +492,4 @@ with st.expander("Explore Protocol & Credits"):
         Data source: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
