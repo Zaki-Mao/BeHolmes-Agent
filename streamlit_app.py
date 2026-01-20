@@ -3,20 +3,20 @@ import requests
 import json
 import google.generativeai as genai
 import re
+import time
 
 # ================= 🔐 0. KEY MANAGEMENT =================
 try:
     EXA_API_KEY = st.secrets["EXA_API_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    # 兼容处理换行符问题
+    CRYPTOPANIC_API_KEY = st.secrets["CRYPTOPANIC_API_KEY"].strip().replace('\n', '').replace('"', '')
     KEYS_LOADED = True
-except FileNotFoundError:
+except Exception:
     EXA_API_KEY = None
     GOOGLE_API_KEY = None
+    CRYPTOPANIC_API_KEY = None
     KEYS_LOADED = False
-except KeyError:
-    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
-    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
-    KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -33,10 +33,10 @@ st.set_page_config(
     page_title="Be Holmes | Research",
     page_icon="🕵️‍♂️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed" # 隐藏左侧原声边栏，我们要自己造右侧栏
 )
 
-# ================= 🎨 2. UI THEME (UPDATED FOR CLICKABLE CARDS) =================
+# ================= 🎨 2. UI THEME =================
 st.markdown("""
 <style>
     /* Import Fonts */
@@ -57,6 +57,36 @@ st.markdown("""
     [data-testid="stToolbar"] { visibility: hidden; }
     [data-testid="stDecoration"] { visibility: hidden; }
 
+    /* Crypto Ticker Item (Right Sidebar Style) */
+    .crypto-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        font-family: 'Inter', monospace;
+        background: rgba(17, 24, 39, 0.4);
+        margin-bottom: 8px;
+        border-radius: 8px;
+        transition: all 0.3s;
+    }
+    .crypto-item:hover {
+        background: rgba(30, 41, 59, 0.6);
+        transform: translateX(-2px);
+    }
+    .c-name { color: #e2e8f0; font-weight: 700; font-size: 0.95rem; }
+    .c-price { color: #f8fafc; font-weight: 400; font-size: 0.95rem; }
+    
+    /* 动态涨跌色块 */
+    .c-change-pos { 
+        color: #4ade80; font-size: 0.8rem; font-weight: 600;
+        background: rgba(6, 78, 59, 0.5); padding: 4px 8px; border-radius: 6px; 
+    }
+    .c-change-neg { 
+        color: #f87171; font-size: 0.8rem; font-weight: 600;
+        background: rgba(127, 29, 29, 0.5); padding: 4px 8px; border-radius: 6px; 
+    }
+
     /* Hero Title */
     .hero-title {
         font-family: 'Inter', sans-serif;
@@ -66,7 +96,7 @@ st.markdown("""
         text-align: center;
         letter-spacing: -2px;
         margin-bottom: 5px;
-        padding-top: 8vh;
+        padding-top: 5vh;
         text-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     
@@ -79,7 +109,7 @@ st.markdown("""
         font-weight: 400;
     }
 
-    /* 4. Input Field Styling (已修复：左对齐 + 字体优化) */
+    /* Input Field Styling */
     div[data-testid="stVerticalBlock"] > div {
         display: flex;
         flex-direction: column;
@@ -92,25 +122,20 @@ st.markdown("""
         color: #ffffff !important;
         border: 1px solid #374151 !important;
         border-radius: 16px !important;
-        
-        /* 修改点在这里：左对齐，调整内边距，调整字号 */
         padding: 15px 20px !important; 
-        font-size: 1rem !important; /* 从 1.1rem 改为 1rem */
-        text-align: left !important; /* 从 center 改为 left */
-        line-height: 1.6 !important; /* 增加行高，让中文更易读 */
-        
+        font-size: 1rem !important; 
+        text-align: left !important; 
+        line-height: 1.6 !important;
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
     }
-    
-    /* Input Focus - Red Glow */
     .stTextArea textarea:focus {
         border-color: rgba(239, 68, 68, 0.8) !important;
         box-shadow: 0 0 15px rgba(220, 38, 38, 0.3) !important;
         background-color: rgba(31, 41, 55, 0.9) !important;
     }
 
-    /* 3. Button Styling: Red Gradient */
+    /* Button Styling */
     div.stButton > button:first-child {
         background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
         background-size: 200% auto !important;
@@ -124,16 +149,11 @@ st.markdown("""
         transition: 0.5s !important;
         box-shadow: 0 0 20px rgba(0,0,0,0.5) !important;
     }
-    
     div.stButton > button:first-child:hover {
         background-position: right center !important;
         transform: scale(1.05) !important;
         box-shadow: 0 0 30px rgba(220, 38, 38, 0.6) !important;
         border-color: #fca5a5 !important;
-    }
-    
-    div.stButton > button:first-child:active {
-        transform: scale(0.98) !important;
     }
 
     /* Result Card */
@@ -143,95 +163,41 @@ st.markdown("""
         border-radius: 12px;
         padding: 20px;
         margin: 20px auto;
-        max-width: 800px;
+        max-width: 100%; /* 适配列宽 */
         backdrop-filter: blur(8px);
     }
-
-    /* Bottom Grid Styling */
-    .top10-container {
-        width: 100%;
-        max-width: 1200px;
-        margin: 60px auto 20px auto;
-        padding: 0 20px;
-    }
-    .top10-header {
-        font-size: 0.9rem;
-        color: #9ca3af;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 20px;
-        border-left: 3px solid #dc2626;
-        padding-left: 10px;
-    }
     
-    .top10-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 15px;
+    /* Top 12 Grid */
+    .top10-container { width: 100%; margin: 40px 0; }
+    .top10-header {
+        font-size: 0.9rem; color: #9ca3af; text-transform: uppercase;
+        letter-spacing: 0.05em; margin-bottom: 20px;
+        border-left: 3px solid #dc2626; padding-left: 10px;
     }
-
-    @media (max-width: 1000px) { .top10-grid { grid-template-columns: repeat(2, 1fr); } }
-    @media (max-width: 600px) { .top10-grid { grid-template-columns: 1fr; } }
-
+    .top10-grid {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;
+    }
+    @media (max-width: 1200px) { .top10-grid { grid-template-columns: repeat(2, 1fr); } }
+    
     .market-item {
         background: rgba(17, 24, 39, 0.6);
         border: 1px solid #374151;
         border-radius: 8px;
         padding: 15px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        transition: all 0.2s;
-        backdrop-filter: blur(5px);
-        min-height: 110px;
-        
-        text-decoration: none !important;
-        color: inherit !important;
-        cursor: pointer;
+        display: flex; flex-direction: column; justify-content: space-between;
+        transition: all 0.2s; backdrop-filter: blur(5px);
+        min-height: 110px; text-decoration: none !important; color: inherit !important;
     }
-    .market-item:hover {
-        border-color: #ef4444;
-        background: rgba(31, 41, 55, 0.9);
-        transform: translateY(-2px);
-    }
-    .m-title {
-        color: #e5e7eb;
-        font-size: 0.95rem;
-        font-weight: 500;
-        margin-bottom: 12px;
-        line-height: 1.4;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-    .m-odds {
-        display: flex;
-        gap: 8px;
-        font-family: 'Inter', monospace;
-        font-size: 0.75rem;
-        margin-top: auto;
-    }
-    .tag-yes {
-        background: rgba(6, 78, 59, 0.4);
-        color: #4ade80;
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-    }
-    .tag-no {
-        background: rgba(127, 29, 29, 0.4);
-        color: #f87171;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-    }
+    .market-item:hover { border-color: #ef4444; background: rgba(31, 41, 55, 0.9); transform: translateY(-2px); }
+    
+    /* Tags */
+    .tag-yes { background: rgba(6, 78, 59, 0.4); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+    .tag-no { background: rgba(127, 29, 29, 0.4); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 3. LOGIC CORE =================
+# ... (搜索和AI逻辑保持不变) ...
 
 def detect_language(text):
     for char in text:
@@ -268,85 +234,6 @@ def search_with_exa(query):
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
 
-# Cache Top 12 Data
-# 缓存 Top 12 数据 - 逻辑修正版 (修复 Yes/No 价格反转)
-@st.cache_data(ttl=60)
-def fetch_top_10_markets():
-    try:
-        url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
-        resp = requests.get(url, timeout=5).json()
-        
-        markets = []
-        
-        if isinstance(resp, list):
-            for event in resp:
-                try:
-                    title = event.get('title', 'Unknown Event')
-                    event_markets = event.get('markets', [])
-                    
-                    if not event_markets or not isinstance(event_markets, list):
-                        continue
-
-                    # 1. 过滤与排序 (保持不变：过滤已关闭市场，按交易量排序)
-                    active_markets = []
-                    for m in event_markets:
-                        if m.get('closed') is True: continue
-                        if not m.get('outcomePrices'): continue
-                        active_markets.append(m)
-
-                    if not active_markets: continue
-
-                    active_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
-                    m = active_markets[0]
-
-                    # 2. 解析 Outcomes 和 Prices
-                    outcomes = m.get('outcomes')
-                    if isinstance(outcomes, str): outcomes = json.loads(outcomes)
-                        
-                    prices = m.get('outcomePrices')
-                    if isinstance(prices, str): prices = json.loads(prices)
-
-                    if not outcomes or not prices or len(prices) != len(outcomes): continue
-
-                    yes_price = 0
-                    no_price = 0
-                    
-                    # =======================================================
-                    # 🌟 核心修复逻辑
-                    # =======================================================
-                    
-                    # 场景 A: 明确的 Yes/No 市场
-                    # 必须找到 "Yes" 所在的索引位置，直接取那个价格
-                    if "Yes" in outcomes and "No" in outcomes:
-                        try:
-                            yes_index = outcomes.index("Yes")
-                            yes_raw = float(prices[yes_index])
-                            yes_price = int(yes_raw * 100)
-                            no_price = 100 - yes_price
-                        except:
-                            # 兜底：如果出错，默认取第一个
-                            yes_price = int(float(prices[0]) * 100)
-                            no_price = 100 - yes_price
-
-                    # 场景 B: 多选项市场 (如 "<250k", "250k-500k")
-                    # 这种情况下，Outcome 里没有 "Yes"，我们保持原策略：取概率最高的那个显示
-                    else:
-                        max_price = max([float(p) for p in prices])
-                        yes_price = int(max_price * 100)
-                        no_price = 100 - yes_price
-
-                    markets.append({
-                        "title": title,
-                        "yes": yes_price,
-                        "no": no_price,
-                        "slug": event.get('slug', '')
-                    })
-                except Exception:
-                    continue
-        return markets
-    except Exception:
-        return []
-
 def fetch_poly_details(slug):
     valid_markets = []
     try:
@@ -377,14 +264,11 @@ def normalize_data(m):
         if m.get('closed') is True: return None
         outcomes = m.get('outcomes')
         if isinstance(outcomes, str): outcomes = json.loads(outcomes)
-        
         prices = m.get('outcomePrices')
         if isinstance(prices, str): prices = json.loads(prices)
-        
         odds_display = "N/A"
         if outcomes and prices and len(outcomes) > 0 and len(prices) > 0:
             odds_display = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
-            
         return {
             "title": m.get('question', 'Unknown'),
             "odds": odds_display,
@@ -423,325 +307,243 @@ def consult_holmes(user_input, market_data):
         1. **Priced-in Check**
         2. **Bluff vs Reality**
         3. **Verdict**
-        
         Output as a concise professional briefing.
         """
         return model.generate_content(prompt).text
     except Exception as e: return f"AI Error: {e}"
 
-# ================= 🖥️ 4. MAIN INTERFACE =================
+# Top 10 Markets Logic
+@st.cache_data(ttl=60)
+def fetch_top_10_markets():
+    try:
+        url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
+        resp = requests.get(url, timeout=5).json()
+        markets = []
+        if isinstance(resp, list):
+            for event in resp:
+                try:
+                    title = event.get('title', 'Unknown Event')
+                    event_markets = event.get('markets', [])
+                    if not event_markets or not isinstance(event_markets, list): continue
+                    
+                    active_markets = []
+                    for m in event_markets:
+                        if m.get('closed') is True: continue
+                        if not m.get('outcomePrices'): continue
+                        active_markets.append(m)
+                    if not active_markets: continue
+                    
+                    active_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
+                    m = active_markets[0]
+                    
+                    outcomes = m.get('outcomes')
+                    if isinstance(outcomes, str): outcomes = json.loads(outcomes)
+                    prices = m.get('outcomePrices')
+                    if isinstance(prices, str): prices = json.loads(prices)
+                    if not outcomes or not prices or len(prices) != len(outcomes): continue
+                    
+                    yes_price = 0
+                    no_price = 0
+                    if "Yes" in outcomes and "No" in outcomes:
+                        try:
+                            yes_index = outcomes.index("Yes")
+                            yes_raw = float(prices[yes_index])
+                            yes_price = int(yes_raw * 100)
+                            no_price = 100 - yes_price
+                        except:
+                            yes_price = int(float(prices[0]) * 100)
+                            no_price = 100 - yes_price
+                    else:
+                        max_price = max([float(p) for p in prices])
+                        yes_price = int(max_price * 100)
+                        no_price = 100 - yes_price
+                        
+                    markets.append({"title": title, "yes": yes_price, "no": no_price, "slug": event.get('slug', '')})
+                except Exception: continue
+        return markets
+    except Exception: return []
 
-# 4.1 Hero Section
-st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
-st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
+# ================= 🖥️ 4. MAIN LAYOUT (WITH RIGHT SIDEBAR) =================
 
-# 4.2 Search Section
-_, mid, _ = st.columns([1, 6, 1])
-with mid:
-    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+# 1. 创建左右布局：左边主控台 (3)，右边实时数据 (1)
+col_main, col_right = st.columns([3, 1])
 
-# 4.3 Button Section
-_, btn_col, _ = st.columns([1, 2, 1])
-with btn_col:
-    ignite_btn = st.button("Decode Alpha", use_container_width=True)
-
-# 4.4 Execution Logic
-if ignite_btn:
-    if not KEYS_LOADED:
-        st.error("🔑 API Keys not found in Secrets.")
-    elif not user_news:
-        st.warning("Please enter intelligence to analyze.")
-    else:
-        with st.container():
-            st.markdown("---")
-            with st.status("Running Neural Analysis...", expanded=True) as status:
-                st.write("Mapping Semantics...")
-                matches, keyword = search_with_exa(user_news)
-                st.write("Calculating Probabilities...")
-                report = consult_holmes(user_news, matches)
-                status.update(label="Analysis Complete", state="complete", expanded=False)
-
-            if matches:
-                m = matches[0]
+# --- 🟢 RIGHT COLUMN: LIVE CRYPTO FEED (AUTO-REFRESHING) ---
+with col_right:
+    st.markdown("<br><br><br>", unsafe_allow_html=True) # 调整顶部间距，对齐
+    
+    # 🔥 核心技术点：使用 st.fragment 让这部分独立刷新
+    # run_every=3 表示每 3 秒刷新一次这个函数内部，页面其他部分不动！
+    @st.fragment(run_every=3)
+    def show_live_crypto():
+        st.markdown("""<div style="color:#94a3b8; font-size:0.8rem; margin-bottom:10px; letter-spacing:1px; font-weight:600;">⚡ LIVE MARKET FEED</div>""", unsafe_allow_html=True)
+        
+        # 实时获取数据
+        try:
+            # 这里的 URL 我们用不需要 Key 的 Binance Public API
+            url = "https://api.binance.com/api/v3/ticker/24hr"
+            targets = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "XRPUSDT"]
+            resp = requests.get(url, timeout=2).json()
+            
+            target_data = [x for x in resp if x['symbol'] in targets]
+            
+            for coin in target_data:
+                name = coin['symbol'].replace("USDT", "")
+                price = float(coin['lastPrice'])
+                change = float(coin['priceChangePercent'])
+                
+                # 价格格式化
+                p_fmt = f"{price:.4f}" if price < 1 else f"{price:,.2f}"
+                
+                # 涨跌样式
+                change_class = "c-change-pos" if change >= 0 else "c-change-neg"
+                change_sign = "+" if change >= 0 else ""
+                
                 st.markdown(f"""
-                <div class="market-card">
-                    <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
-                    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-                        <div>
-                            <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
-                            <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
-                        </div>
-                        <div style="text-align:right;">
-                            <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
-                            <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
-                        </div>
+                <div class="crypto-item">
+                    <div class="c-name">{name}</div>
+                    <div style="text-align:right;">
+                        <div class="c-price">${p_fmt}</div>
+                        <span class="{change_class}">{change_sign}{change:.2f}%</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
-            st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
+            st.caption(f"Last Update: {time.strftime('%H:%M:%S')}")
+            
+        except Exception:
+            st.error("Connecting...")
 
-# ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS =================
+    # 执行这个独立刷新的函数
+    show_live_crypto()
 
-top10_markets = fetch_top_10_markets()
+# --- 🔵 LEFT COLUMN: MAIN INTERFACE ---
+with col_main:
+    # 4.1 Hero Section
+    st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
 
-if top10_markets:
-    # UPDATED: Use <a> tag instead of <div> for the card wrapper
-    # Added href linking to Polymarket event page
-    cards_html = "".join([f"""
-    <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
-        <div class="m-title" title="{m['title']}">{m['title']}</div>
-        <div class="m-odds">
-            <span class="tag-yes">Yes {m['yes']}¢</span>
-            <span class="tag-no">No {m['no']}¢</span>
+    # 4.2 Search Section
+    _, mid, _ = st.columns([1, 8, 1])
+    with mid:
+        user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+
+    # 4.3 Button Section
+    _, btn_col, _ = st.columns([1, 3, 1])
+    with btn_col:
+        ignite_btn = st.button("Decode Alpha", use_container_width=True)
+
+    # 4.4 Execution Logic
+    if ignite_btn:
+        if not KEYS_LOADED:
+            st.error("🔑 API Keys not found in Secrets.")
+        elif not user_news:
+            st.warning("Please enter intelligence to analyze.")
+        else:
+            with st.container():
+                st.markdown("---")
+                with st.status("Running Neural Analysis...", expanded=True) as status:
+                    st.write("Mapping Semantics...")
+                    matches, keyword = search_with_exa(user_news)
+                    st.write("Calculating Probabilities...")
+                    report = consult_holmes(user_news, matches)
+                    status.update(label="Analysis Complete", state="complete", expanded=False)
+
+                if matches:
+                    m = matches[0]
+                    st.markdown(f"""
+                    <div class="market-card">
+                        <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                            <div>
+                                <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
+                                <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
+                                <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
+
+    # ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS =================
+    top10_markets = fetch_top_10_markets()
+
+    if top10_markets:
+        cards_html = "".join([f"""
+        <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
+            <div class="m-title" title="{m['title']}">{m['title']}</div>
+            <div class="m-odds">
+                <span class="tag-yes">Yes {m['yes']}¢</span>
+                <span class="tag-no">No {m['no']}¢</span>
+            </div>
+        </a>""" for m in top10_markets])
+
+        final_html = f"""
+        <div class="top10-container">
+            <div class="top10-header">Trending on Polymarket (Top 12)</div>
+            <div class="top10-grid">{cards_html}</div>
         </div>
-    </a>""" for m in top10_markets])
-
-    final_html = f"""
-    <div class="top10-container">
-        <div class="top10-header">Trending on Polymarket (Top 12)</div>
-        <div class="top10-grid">{cards_html}</div>
-    </div>
-    """
-    
-    st.markdown(final_html, unsafe_allow_html=True)
-else:
-    st.markdown("""
-    <div style="text-align:center; margin-top:50px; color:#666;">
-        Connecting to Prediction Markets...
-    </div>
-    """, unsafe_allow_html=True)
-
-# ================= 👇 6. 底部协议与说明 (PROTOCOL & MANUAL) =================
-
-st.markdown("<br><br>", unsafe_allow_html=True)
-
-# 自定义底部样式 (中心化布局版)
-st.markdown("""
-<style>
-    /* 强制 Radio 组件居中 */
-    div.row-widget.stRadio > div {
-        justify-content: center;
-    }
-
-    /* 协议文本容器 */
-    .protocol-container {
-        font-family: 'Inter', sans-serif;
-        color: #cbd5e1; /* slate-300 */
-        font-size: 0.95rem;
-        line-height: 1.8;
-        margin-top: 20px;
-        text-align: center; /* 全局居中 */
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    /* 每一个步骤的样式 - 改为居中块状风格 */
-    .protocol-step {
-        margin-bottom: 25px;
-        padding: 15px 20px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.03); /* 极淡的背景 */
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        max-width: 700px; /* 限制宽度，防止文字拉太长难看 */
-        width: 100%;
-        transition: all 0.3s;
-    }
-    .protocol-step:hover {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    /* 步骤标题 */
-    .protocol-title {
-        font-weight: 700;
-        color: #ef4444; /* 使用红色高亮标题 */
-        font-size: 1rem;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        display: block;
-        margin-bottom: 8px;
-    }
-
-    /* 底部版权区 */
-    .credits-section {
-        text-align: center;
-        margin-top: 30px;
-        padding-top: 20px;
-        border-top: 1px solid #334155;
-        color: #64748b;
-        font-size: 0.85rem;
-        font-family: monospace;
-    }
-    .credits-highlight {
-        color: #94a3b8;
-        font-weight: 600;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Expander 组件 - 纯英文标题，无 Emoji
-with st.expander("Operational Protocol & System Architecture"):
-    
-    # 语言切换开关 (CSS 已强制其居中)
-    lang_mode = st.radio(
-        "Language", 
-        ["EN", "CN"], 
-        horizontal=True, 
-        label_visibility="collapsed"
-    )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 内容显示逻辑
-    if lang_mode == "EN":
-        st.markdown("""
-        <div class="protocol-container">
-            <div class="protocol-step">
-                <span class="protocol-title">1. Intelligence Injection (Input)</span>
-                User inputs unstructured natural language data—breaking news, social sentiment, or event-specific queries—into the system's intelligence context window.
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">2. Neural Semantic Mapping (Processing)</span>
-                Powered by <b>Exa.ai</b>, the engine converts input semantics into high-dimensional vector embeddings to identify correlated prediction markets, bypassing rigid keyword limitations.
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">3. Bayesian Alpha Decoding (Analysis)</span>
-                <b>Google Gemini</b> acts as the Macro-Analyst. It synthesizes market implied probabilities (Odds) with the input intelligence to calculate the "Expectation Gap"—determining if the news is priced-in or represents an alpha opportunity.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        """
+        st.markdown(final_html, unsafe_allow_html=True)
     else:
-        st.markdown("""
-        <div class="protocol-container">
-            <div class="protocol-step">
-                <span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>
-                用户输入非结构化自然语言数据——无论是突发新闻、社交媒体情绪还是特定事件查询，系统将自动解析其语义核心。
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>
-                由 <b>Exa.ai</b> 驱动，系统将文本转化为高维向量嵌入（Embeddings），在 Polymarket 链上合约库中进行神经搜索，精准定位强相关预测市场。
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span>
-                <b>Google Gemini</b> 作为宏观分析引擎，综合市场隐含概率（赔率）与输入情报，计算“预期差”，判断该信息是否已被市场定价 (Priced-in) 或存在套利空间。
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("""<div style="text-align:center; margin-top:50px; color:#666;">Connecting to Prediction Markets...</div>""", unsafe_allow_html=True)
 
-    # 底部版权 (Credits)
+    # ================= 👇 6. PROTOCOL & MANUAL =================
+    st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown("""
-    <div class="credits-section">
-        SYSTEM ARCHITECTURE POWERED BY<br>
-        <span class="credits-highlight">Exa.ai (Neural Search)</span> & 
-        <span class="credits-highlight">Google Gemini (Cognitive Core)</span><br><br>
-        Data Stream: Polymarket Gamma API
-    </div>
+    <style>
+        div.row-widget.stRadio > div { justify-content: center; }
+        .protocol-container { font-family: 'Inter', sans-serif; color: #cbd5e1; font-size: 0.95rem; line-height: 1.8; margin-top: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; }
+        .protocol-step { margin-bottom: 25px; padding: 15px 20px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); max-width: 700px; width: 100%; transition: all 0.3s; }
+        .protocol-step:hover { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); }
+        .protocol-title { font-weight: 700; color: #ef4444; font-size: 1rem; letter-spacing: 0.5px; text-transform: uppercase; display: block; margin-bottom: 8px; }
+        .credits-section { text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #334155; color: #64748b; font-size: 0.85rem; font-family: monospace; }
+        .credits-highlight { color: #94a3b8; font-weight: 600; }
+    </style>
     """, unsafe_allow_html=True)
+
+    with st.expander("Operational Protocol & System Architecture"):
+        lang_mode = st.radio("Language", ["EN", "CN"], horizontal=True, label_visibility="collapsed")
+        st.markdown("<br>", unsafe_allow_html=True)
+        if lang_mode == "EN":
+            st.markdown("""<div class="protocol-container"><div class="protocol-step"><span class="protocol-title">1. Intelligence Injection (Input)</span>User inputs unstructured natural language data...</div><div class="protocol-step"><span class="protocol-title">2. Neural Semantic Mapping (Processing)</span>Powered by <b>Exa.ai</b>...</div><div class="protocol-step"><span class="protocol-title">3. Actionable Trading Insights (Analysis)</span><b>Google Gemini</b> utilizes neural semantic analysis...</div></div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("""<div class="protocol-container"><div class="protocol-step"><span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>用户输入非结构化自然语言数据...</div><div class="protocol-step"><span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>由 <b>Exa.ai</b> 驱动...</div><div class="protocol-step"><span class="protocol-title">3. 可执行交易洞察 (Actionable Insights)</span><b>Google Gemini</b> 利用神经语义分析...</div></div>""", unsafe_allow_html=True)
+        st.markdown("""<div class="credits-section">SYSTEM ARCHITECTURE POWERED BY<br><span class="credits-highlight">Exa.ai</span> & <span class="credits-highlight">Google Gemini</span><br><br>Data Stream: Polymarket Gamma API</div>""", unsafe_allow_html=True)
 
 # ================= ⚡ 底部实时滚动新闻条 (v2 开发者修复版) =================
-
 @st.cache_data(ttl=300)
 def fetch_ticker_news():
     try:
-        # 1. 清洗 Key (防止复制多余空格)
-        api_key = st.secrets["CRYPTOPANIC_API_KEY"].strip().replace('\n', '').replace('"', '')
-        
-        # 2. 🔴 关键修改：使用 Developer v2 接口地址 🔴
-        # 你的文档截图明确指出：Base endpoint is /api/developer/v2
+        api_key = st.secrets.get("CRYPTOPANIC_API_KEY", "").strip().replace('\n', '').replace('"', '')
         url = f"https://cryptopanic.com/api/developer/v2/posts/?auth_token={api_key}&public=true&filter=rising"
-        
-        # 3. 发送请求 (不带复杂 Header，保持简单)
         resp = requests.get(url, timeout=10)
-        
-        # 4. 错误处理
-        if resp.status_code != 200:
-            # 如果还是报错，把具体原因打印出来
-            return [f"⚠️ Error {resp.status_code}", f"Msg: {resp.text[:50]}..."]
-            
+        if resp.status_code != 200: return [f"⚠️ Error {resp.status_code}", f"Msg: {resp.text[:50]}..."]
         data = resp.json()
         news_items = []
-        
         if "results" in data:
             for item in data["results"][:15]:
                 title = item["title"]
                 code = "⚡"
-                # 获取代币代码，例如 [BTC]
-                if "currencies" in item and item["currencies"]:
-                    code = f"[{item['currencies'][0]['code']}]"
+                if "currencies" in item and item["currencies"]: code = f"[{item['currencies'][0]['code']}]"
                 news_items.append(f"{code} {title}")
-        
         return news_items if news_items else ["⚠️ Connected, but no trending news found."]
+    except Exception as e: return [f"❌ System Error: {str(e)}"]
 
-    except Exception as e:
-        return [f"❌ System Error: {str(e)}"]
-
-# 获取新闻
 news_list = fetch_ticker_news()
-
-# 拼接字符串
 ticker_text = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(news_list)
-
-# 注入 CSS 和 HTML (保持原样，无需修改样式)
 
 st.markdown(f"""
 <style>
-    .news-ticker-container {{
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        background-color: #0f172a;
-        border-top: 1px solid #dc2626;
-        color: #e2e8f0;
-        font-family: 'Inter', monospace;
-        font-size: 0.9rem;
-        padding: 8px 0;
-        z-index: 9999;
-        overflow: hidden;
-        white-space: nowrap;
-        box-shadow: 0 -4px 15px rgba(0,0,0,0.5);
-    }}
+    .news-ticker-container {{ position: fixed; bottom: 0; left: 0; width: 100%; background-color: #0f172a; border-top: 1px solid #dc2626; color: #e2e8f0; font-family: 'Inter', monospace; font-size: 0.9rem; padding: 8px 0; z-index: 9999; overflow: hidden; white-space: nowrap; box-shadow: 0 -4px 15px rgba(0,0,0,0.5); }}
     .ticker-wrap {{ width: 100%; overflow: hidden; }}
-    
-    .ticker-move {{
-        display: inline-block;
-        white-space: nowrap;
-        /* 1. 设置合理的时长：120s (2分钟) 比较适合阅读 */
-        animation: ticker 120s linear infinite; 
-    }}
-    
-    /* 鼠标悬停暂停 */
-    .ticker-wrap:hover .ticker-move {{
-        animation-play-state: paused;
-    }}
-    
-    /* 🔴 关键修复在这里 🔴 */
-    @keyframes ticker {{
-        /* 从 100vw (屏幕右侧边缘) 开始，而不是 100% (文字长度) */
-        0% {{ transform: translate3d(100vw, 0, 0); }} 
-        100% {{ transform: translate3d(-100%, 0, 0); }}
-    }}
+    .ticker-move {{ display: inline-block; white-space: nowrap; animation: ticker 120s linear infinite; }}
+    .ticker-wrap:hover .ticker-move {{ animation-play-state: paused; }}
+    @keyframes ticker {{ 0% {{ transform: translate3d(100vw, 0, 0); }} 100% {{ transform: translate3d(-100%, 0, 0); }} }}
 </style>
-
-<div class="news-ticker-container">
-    <div class="ticker-wrap">
-        <div class="ticker-move">
-            {ticker_text}
-        </div>
-    </div>
-</div>
-<br><br><br>
+<div class="news-ticker-container"><div class="ticker-wrap"><div class="ticker-move">{ticker_text}</div></div></div><br><br><br>
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
