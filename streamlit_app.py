@@ -269,7 +269,7 @@ def search_with_exa(query):
     return markets_found, search_query
 
 # Cache Top 12 Data
-# 缓存 Top 12 数据 - 终极修复版 (过滤已结束市场)
+# 缓存 Top 12 数据 - 逻辑修正版 (修复 Yes/No 价格反转)
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
@@ -287,56 +287,52 @@ def fetch_top_10_markets():
                     if not event_markets or not isinstance(event_markets, list):
                         continue
 
-                    # =======================================================
-                    # 🔍 核心修复：先过滤，再排序
-                    # 1. 过滤掉所有 'closed': True 的市场 (踢出已结束的僵尸市场)
-                    # 2. 过滤掉 outcomePrices 无效的市场
-                    # =======================================================
+                    # 1. 过滤与排序 (保持不变：过滤已关闭市场，按交易量排序)
                     active_markets = []
                     for m in event_markets:
-                        # 如果市场已关闭，直接跳过
-                        if m.get('closed') is True:
-                            continue
-                        
-                        # 检查是否有有效价格数据
-                        prices_str = m.get('outcomePrices')
-                        if not prices_str: continue
-                        
-                        # 临时解析一下价格，确保不是全0或无效
-                        try:
-                            prices = json.loads(prices_str) if isinstance(prices_str, str) else prices_str
-                            if not prices or len(prices) < 2: continue
-                            active_markets.append(m)
-                        except:
-                            continue
+                        if m.get('closed') is True: continue
+                        if not m.get('outcomePrices'): continue
+                        active_markets.append(m)
 
-                    # 如果该事件下没有活着且有效的市场，跳过该事件
-                    if not active_markets:
-                        continue
+                    if not active_markets: continue
 
-                    # 3. 在活着及有效的市场中，按 Volume 倒序排列，取最大的那个
                     active_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
                     m = active_markets[0]
 
-                    # =======================================================
-                    # 下面是价格解析逻辑 (保持优化过的版本)
-                    # =======================================================
+                    # 2. 解析 Outcomes 和 Prices
                     outcomes = m.get('outcomes')
                     if isinstance(outcomes, str): outcomes = json.loads(outcomes)
                         
                     prices = m.get('outcomePrices')
                     if isinstance(prices, str): prices = json.loads(prices)
 
+                    if not outcomes or not prices or len(prices) != len(outcomes): continue
+
                     yes_price = 0
                     no_price = 0
                     
-                    # 逻辑：取最高概率作为 Yes 展示
-                    if len(prices) >= 2:
+                    # =======================================================
+                    # 🌟 核心修复逻辑
+                    # =======================================================
+                    
+                    # 场景 A: 明确的 Yes/No 市场
+                    # 必须找到 "Yes" 所在的索引位置，直接取那个价格
+                    if "Yes" in outcomes and "No" in outcomes:
+                        try:
+                            yes_index = outcomes.index("Yes")
+                            yes_raw = float(prices[yes_index])
+                            yes_price = int(yes_raw * 100)
+                            no_price = 100 - yes_price
+                        except:
+                            # 兜底：如果出错，默认取第一个
+                            yes_price = int(float(prices[0]) * 100)
+                            no_price = 100 - yes_price
+
+                    # 场景 B: 多选项市场 (如 "<250k", "250k-500k")
+                    # 这种情况下，Outcome 里没有 "Yes"，我们保持原策略：取概率最高的那个显示
+                    else:
                         max_price = max([float(p) for p in prices])
                         yes_price = int(max_price * 100)
-                        no_price = 100 - yes_price
-                    elif len(prices) == 1:
-                        yes_price = int(float(prices[0]) * 100)
                         no_price = 100 - yes_price
 
                     markets.append({
@@ -629,6 +625,7 @@ with st.expander("📁 Operational Protocol & System Architecture / 操作协议
         Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
