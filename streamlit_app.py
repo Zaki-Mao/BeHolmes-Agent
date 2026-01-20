@@ -269,11 +269,10 @@ def search_with_exa(query):
     return markets_found, search_query
 
 # Cache Top 12 Data
-# 缓存 Top 12 数据 - 智能筛选版 (修复 0¢ 问题)
+# 缓存 Top 12 数据 - 终极修复版 (过滤已结束市场)
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
-        # 获取 Top 12 事件
         url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
         resp = requests.get(url, timeout=5).json()
         
@@ -283,52 +282,59 @@ def fetch_top_10_markets():
             for event in resp:
                 try:
                     title = event.get('title', 'Unknown Event')
-                    
-                    # 获取该事件下的所有子市场
                     event_markets = event.get('markets', [])
+                    
                     if not event_markets or not isinstance(event_markets, list):
                         continue
 
-                    # -------------------------------------------------------
-                    # 🌟 核心修复 1: 按 Volume 倒序排序
-                    # 确保我们取到的是该话题下交易最活跃的主市场，而不是冷门/过期选项
-                    # -------------------------------------------------------
-                    event_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
-                    
-                    # 取出交易量最大的市场
-                    m = event_markets[0]
-                    
-                    # 解析 Outcomes 和 Prices
+                    # =======================================================
+                    # 🔍 核心修复：先过滤，再排序
+                    # 1. 过滤掉所有 'closed': True 的市场 (踢出已结束的僵尸市场)
+                    # 2. 过滤掉 outcomePrices 无效的市场
+                    # =======================================================
+                    active_markets = []
+                    for m in event_markets:
+                        # 如果市场已关闭，直接跳过
+                        if m.get('closed') is True:
+                            continue
+                        
+                        # 检查是否有有效价格数据
+                        prices_str = m.get('outcomePrices')
+                        if not prices_str: continue
+                        
+                        # 临时解析一下价格，确保不是全0或无效
+                        try:
+                            prices = json.loads(prices_str) if isinstance(prices_str, str) else prices_str
+                            if not prices or len(prices) < 2: continue
+                            active_markets.append(m)
+                        except:
+                            continue
+
+                    # 如果该事件下没有活着且有效的市场，跳过该事件
+                    if not active_markets:
+                        continue
+
+                    # 3. 在活着及有效的市场中，按 Volume 倒序排列，取最大的那个
+                    active_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
+                    m = active_markets[0]
+
+                    # =======================================================
+                    # 下面是价格解析逻辑 (保持优化过的版本)
+                    # =======================================================
                     outcomes = m.get('outcomes')
                     if isinstance(outcomes, str): outcomes = json.loads(outcomes)
                         
                     prices = m.get('outcomePrices')
                     if isinstance(prices, str): prices = json.loads(prices)
-                    
-                    if not outcomes or not prices: continue
 
                     yes_price = 0
                     no_price = 0
                     
-                    # -------------------------------------------------------
-                    # 🌟 核心修复 2: 价格展示逻辑优化
-                    # -------------------------------------------------------
-                    
-                    # 情况 A: 标准二元市场 (Yes/No)
-                    if len(prices) == 2 and "Yes" in str(outcomes) and "No" in str(outcomes):
-                        yes_price = int(float(prices[0]) * 100)
-                        no_price = int(float(prices[1]) * 100)
-                    
-                    # 情况 B: 多选项市场 (如 "谁赢得大选?", "IPO日期?")
-                    # 原来的代码直接取 prices[0]，如果是冷门选项就会显示 0。
-                    # 现在的逻辑：取【概率最高】的选项作为 "Yes" 的价格展示，代表"最可能发生的情况"。
-                    elif len(prices) >= 2:
-                        # 找到数值最大的价格
+                    # 逻辑：取最高概率作为 Yes 展示
+                    if len(prices) >= 2:
                         max_price = max([float(p) for p in prices])
                         yes_price = int(max_price * 100)
                         no_price = 100 - yes_price
-                    
-                    # 情况 C: 只有一个价格的数据
                     elif len(prices) == 1:
                         yes_price = int(float(prices[0]) * 100)
                         no_price = 100 - yes_price
@@ -623,6 +629,7 @@ with st.expander("📁 Operational Protocol & System Architecture / 操作协议
         Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
