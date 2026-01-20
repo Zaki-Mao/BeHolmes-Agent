@@ -414,3 +414,4 @@ if ignite_btn:
 
         st.markdown("### 🧠 Strategic Report")
         st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
+
