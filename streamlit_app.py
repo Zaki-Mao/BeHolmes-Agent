@@ -39,10 +39,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ================= 🎨 2. RED UI THEME (CSS OVERHAUL) =================
+# ================= 🎨 2. UI THEME (MOBILE OPTIMIZED) =================
 st.markdown("""
 <style>
-    /* 1. 全局字体与背景 */
+    /* 1. 全局基础 */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
     
     .stApp { 
@@ -50,27 +50,28 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* 隐藏默认头部 */
+    /* 隐藏杂项 */
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
     header { visibility: hidden; }
     footer { visibility: hidden; }
     
-    /* 2. 侧边栏深度定制 */
+    /* 2. 侧边栏 */
     [data-testid="stSidebar"] { 
         background-color: #000000; 
         border-right: 1px solid #222; 
     }
     
-    /* 3. 标题体系 */
+    /* 3. 标题体系 (Desktop 默认) */
     h1 { 
         background: linear-gradient(90deg, #FF4B4B, #FF9F9F); 
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         font-family: 'Inter', sans-serif; font-weight: 900; letter-spacing: -1px;
         border-bottom: 2px solid #222; padding-bottom: 20px;
+        font-size: 3rem; /* 电脑端大字体 */
     }
     h3 { color: #FF4B4B !important; font-weight: 700; }
     
-    /* 4. 输入框美化 */
+    /* 4. 输入框 */
     .stTextArea textarea { 
         background-color: #0F0F0F !important; 
         color: #E0E0E0 !important; 
@@ -80,7 +81,7 @@ st.markdown("""
     }
     .stTextArea textarea:focus { border-color: #FF4B4B !important; box-shadow: 0 0 10px rgba(255, 75, 75, 0.2); }
     
-    /* 5. 核心按钮 (Red Neon) */
+    /* 5. 按钮 (Red Neon) */
     .stButton button {
         background: linear-gradient(90deg, #D90429, #EF233C) !important;
         color: white !important; 
@@ -92,13 +93,8 @@ st.markdown("""
         letter-spacing: 1px;
         transition: all 0.3s ease;
     }
-    .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(217, 4, 41, 0.4);
-        color: white !important;
-    }
-
-    /* 6. 市场卡片 (Market Card) */
+    
+    /* 6. 市场卡片 */
     .market-card {
         background: #0A0A0A;
         border: 1px solid #222;
@@ -108,27 +104,23 @@ st.markdown("""
         margin-bottom: 20px;
         transition: all 0.3s ease;
     }
-    .market-card:hover {
-        border-color: #EF233C;
-        background: #111;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.5);
-    }
-    .card-title { font-size: 1.2rem; font-weight: 700; color: #FFF; margin-bottom: 10px; }
+    .card-title { font-size: 1.2rem; font-weight: 700; color: #FFF; margin-bottom: 15px; line-height: 1.4; }
     .card-stat { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-size: 1.4rem; font-weight: 700; }
     .card-sub { color: #666; font-size: 0.85rem; }
 
-    /* 7. 报告盒子 (Report Box) */
+    /* 7. 报告盒子 */
     .report-box {
         background-color: #0E0E0E; 
         border: 1px solid #222; 
-        padding: 30px;
+        padding: 25px;
         border-radius: 12px; 
         margin-top: 20px;
         color: #CCC;
         line-height: 1.6;
+        font-size: 0.95rem;
     }
     
-    /* 8. 侧边栏 Ticker 样式 */
+    /* 8. Ticker */
     .ticker-item {
         padding: 12px 0;
         border-bottom: 1px solid #1A1A1A;
@@ -137,7 +129,28 @@ st.markdown("""
     .ticker-title { color: #CCC; margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;}
     .ticker-price { font-family: 'JetBrains Mono', monospace; color: #FF4B4B; font-weight: bold; font-size: 1rem;}
     .ticker-vol { color: #555; float: right; font-size: 0.75rem; margin-top: 2px;}
-    
+
+    /* ========== 📱 MOBILE RESPONSIVE TWEAKS (手机端优化核心) ========== */
+    @media only screen and (max-width: 768px) {
+        /* 缩小标题，防止换行过于夸张 */
+        h1 { font-size: 2rem !important; padding-bottom: 10px !important; }
+        
+        /* 调整卡片内边距，节省屏幕空间 */
+        .market-card { padding: 15px !important; }
+        
+        /* 字体调整 */
+        .card-title { font-size: 1.1rem !important; }
+        .card-stat { font-size: 1.2rem !important; }
+        
+        /* 按钮全宽，方便手指点击 */
+        .stButton button { width: 100% !important; margin-top: 5px !important; }
+        
+        /* 报告文字稍微调小 */
+        .report-box { padding: 15px !important; font-size: 0.9rem !important; }
+        
+        /* 顶部布局优化：让 Manual 按钮不那么突兀 */
+        div[data-testid="column"] { width: 100% !important; flex: 1 1 auto !important; min-width: 0px !important; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -149,7 +162,6 @@ def detect_language(text):
     return "ENGLISH"
 
 def generate_english_keywords(user_text):
-    """Bilingual Bridge: Translate Chinese intent to English keywords"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{user_text}". Output: Keywords only."""
@@ -182,7 +194,6 @@ def search_with_exa(query):
 
 def fetch_poly_details(slug):
     valid_markets = []
-    # Try Event
     try:
         url = f"https://gamma-api.polymarket.com/events?slug={slug}"
         resp = requests.get(url, timeout=3).json()
@@ -192,7 +203,6 @@ def fetch_poly_details(slug):
                 if p: valid_markets.append(p)
             return valid_markets
     except: pass
-    # Try Market
     try:
         url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
         resp = requests.get(url, timeout=3).json()
@@ -276,17 +286,15 @@ def consult_holmes(user_input, market_data):
 
 # ================= 🖥️ 5. MAIN INTERFACE =================
 
-# --- A. 侧边栏：实时行情 Ticker (Top 10) ---
+# --- A. 侧边栏 ---
 with st.sidebar:
     st.markdown("### 📡 LIVE FEED")
     st.caption("Top 10 Active Markets")
     
     if KEYS_LOADED:
         try:
-            # 拉取 Top 10 Active Markets
             url = "https://gamma-api.polymarket.com/markets?limit=10&sort=volume&closed=false"
             live_mkts = requests.get(url, timeout=3).json()
-            
             for m in live_mkts:
                 p = normalize_data(m)
                 if p:
@@ -301,7 +309,7 @@ with st.sidebar:
             st.warning("⚠️ Connection slow...")
     else:
         st.error("🔒 Keys Missing")
-        st.caption("Please add EXA_API_KEY and GOOGLE_API_KEY to Streamlit Secrets.")
+        st.caption("Add Keys to Secrets.")
 
     st.markdown("---")
     if KEYS_LOADED:
@@ -309,56 +317,33 @@ with st.sidebar:
     else:
         st.error("🔴 System: **Offline**")
 
-# --- B. 顶部：标题 & 手册按钮 ---
-c1, c2 = st.columns([6, 1])
+# --- B. 顶部：标题 & 手册按钮 (移动端优化布局) ---
+# 在移动端，columns 会自动堆叠。我们通过 CSS 优化了间距。
+c1, c2 = st.columns([5, 2])
 with c1:
     st.title("Be Holmes")
-    st.caption("THE GENIUS TRADER | V2.0 STABLE")
+    st.caption("THE GENIUS TRADER | V2.1 MOBILE")
 
 with c2:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("📘 Manual"):
-        @st.dialog("User Manual / 使用手册")
+        @st.dialog("User Manual")
         def show_manual():
             lang_mode = st.radio("Language / 语言", ["English", "中文"], horizontal=True)
             st.markdown("---")
             if lang_mode == "中文":
                 st.markdown("""
                 ### 🕵️‍♂️ Be Holmes 使用指南
-                
-                **1. 核心逻辑**
-                本工具利用 **Exa 神经搜索** 连接 **Polymarket** 实时数据，由 **Gemini** 扮演顶级基金经理进行博弈分析。
-                
-                **2. 核心功能**
-                * **双语支持：** 输入中文，系统自动转译为英文关键词搜索，再用中文回答。
-                * **博弈分析：** 识别“已定价”消息，避免追高。
-                * **实时数据：** 直接从链上获取最新赔率。
-                
-                **3. 读懂报告**
-                * 🟢 **BUY:** 市场低估了消息，Alpha 机会。
-                * ⚪ **WAIT:** 消息已反映在价格里，别做韭菜。
-                
-                **4. 免责声明**
-                本工具仅供信息参考，不构成投资建议。
+                **核心功能：** 双语语义搜索 + 贝叶斯博弈分析。
+                **如何使用：** 输入任意新闻（中英文皆可），AI自动寻找预测市场合约并给出交易建议。
+                **免责声明：** 仅供参考，不构成投资建议。
                 """)
             else:
                 st.markdown("""
-                ### 🕵️‍♂️ Be Holmes User Guide
-                
-                **1. Core Logic**
-                Bridges your intent with **Polymarket** contracts using **Exa Neural Search**, analyzed by **Gemini**.
-                
-                **2. Key Features**
-                * **Bilingual:** Auto-translates Chinese intent to English markets.
-                * **Game Theory:** Checks if news is "Priced-in".
-                * **Real-time:** Live on-chain odds.
-                
-                **3. The Verdict**
-                * 🟢 **BUY:** Market is sleeping on this news.
-                * ⚪ **WAIT:** News is already priced in.
-                
-                **4. Disclaimer**
-                Not financial advice.
+                ### 🕵️‍♂️ User Guide
+                **Core:** Neural Search + Game Theory Analysis.
+                **How-to:** Input any news. AI finds the contract and gives alpha strategy.
+                **Disclaimer:** Not financial advice.
                 """)
         show_manual()
 
@@ -370,12 +355,11 @@ ignite_btn = st.button("🔍 DECODE ALPHA", use_container_width=True)
 
 if ignite_btn:
     if not KEYS_LOADED:
-        st.error("❌ API Keys not found. Please set them in Streamlit Secrets.")
+        st.error("❌ API Keys not found in Secrets.")
     elif not user_news:
         st.warning("⚠️ Please input intel first.")
     else:
         with st.status("🧠 Holmes is thinking...", expanded=True) as status:
-            # 1. Search
             st.write("🛰️ Exa Sniper: Scanning Polymarket...")
             matches, keyword = search_with_exa(user_news)
             
@@ -384,12 +368,10 @@ if ignite_btn:
             else:
                 st.warning(f"⚠️ No direct contract found for '{keyword}'. Switching to Macro Mode.")
             
-            # 2. Analyze
             st.write("⚖️ Calculating Bayesian Probabilities...")
             report = consult_holmes(user_news, matches)
             status.update(label="✅ Strategy Ready", state="complete", expanded=False)
 
-        # 3. 结果展示 (美化版)
         if matches:
             m = matches[0]
             st.markdown("### 🎯 Target Contract")
@@ -410,8 +392,7 @@ if ignite_btn:
             """, unsafe_allow_html=True)
             
             link = f"https://polymarket.com/event/{m['slug']}"
-            st.markdown(f"<a href='{link}' target='_blank'><button class='stButton' style='width:100%; border-radius:8px; background:#D90429; color:white; padding:10px; border:none; font-weight:bold; cursor:pointer;'>🚀 TRADE ON POLYMARKET</button></a>", unsafe_allow_html=True)
+            st.markdown(f"<a href='{link}' target='_blank'><button class='stButton' style='width:100%; border-radius:8px; background:#D90429; color:white; padding:12px; border:none; font-weight:bold; cursor:pointer; font-size:1rem;'>🚀 TRADE ON POLYMARKET</button></a>", unsafe_allow_html=True)
 
         st.markdown("### 🧠 Strategic Report")
         st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
-
