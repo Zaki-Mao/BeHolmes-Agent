@@ -684,7 +684,7 @@ news_list = fetch_ticker_news()
 ticker_text = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(news_list)
 
 # 注入 CSS 和 HTML (保持原样，无需修改样式)
-# 注入 CSS 和 HTML
+
 st.markdown(f"""
 <style>
     .news-ticker-container {{
@@ -708,9 +708,8 @@ st.markdown(f"""
     .ticker-move {{
         display: inline-block;
         white-space: nowrap;
-        /* 🔴 这里修改速度：原来的 90s 改成 200s 或 300s */
-        /* 数值越大，滚得越慢 */
-        animation: ticker 200s linear infinite; 
+        /* 1. 设置合理的时长：120s (2分钟) 比较适合阅读 */
+        animation: ticker 120s linear infinite; 
     }}
     
     /* 鼠标悬停暂停 */
@@ -718,8 +717,10 @@ st.markdown(f"""
         animation-play-state: paused;
     }}
     
+    /* 🔴 关键修复在这里 🔴 */
     @keyframes ticker {{
-        0% {{ transform: translate3d(100%, 0, 0); }}
+        /* 从 100vw (屏幕右侧边缘) 开始，而不是 100% (文字长度) */
+        0% {{ transform: translate3d(100vw, 0, 0); }} 
         100% {{ transform: translate3d(-100%, 0, 0); }}
     }}
 </style>
@@ -733,6 +734,7 @@ st.markdown(f"""
 </div>
 <br><br><br>
 """, unsafe_allow_html=True)
+
 
 
 
