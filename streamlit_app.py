@@ -45,7 +45,7 @@ st.markdown("""
     /* 1. Global Background */
     .stApp {
         background-image: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.9)), 
-                          url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop');
+                          url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -639,6 +639,7 @@ with st.expander("Operational Protocol & System Architecture"):
         Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
