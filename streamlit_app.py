@@ -33,26 +33,20 @@ st.set_page_config(
     page_title="Be Holmes | Alpha Terminal",
     page_icon="🕵️‍♂️",
     layout="wide",
-    initial_sidebar_state="expanded" # 尝试默认展开
+    initial_sidebar_state="expanded" 
 )
 
-# ================= 🎨 2. UI THEME (FIXED SIDEBAR) =================
+# ================= 🎨 2. UI THEME (MOBILE PRO) =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
     
     .stApp { background-color: #050505; font-family: 'Inter', sans-serif; }
     
-    /* 🔥 关键修复：不要隐藏 header，否则侧边栏开关也会消失！ */
-    /* header { visibility: hidden; }  <-- 删掉这行 */
-    
-    /* 只隐藏右上角的菜单 (Deploy/Settings)，保留左上角的侧边栏箭头 */
+    /* 🔥 关键修复：保留左上角侧边栏开关，只隐藏右上角菜单 */
     [data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
     [data-testid="stDecoration"] { visibility: hidden; }
-    
-    /* 让顶部导航栏背景透明，融合进黑色背景 */
-    header[data-testid="stHeader"] { background-color: rgba(0,0,0,0); }
-    
+    header[data-testid="stHeader"] { background-color: rgba(0,0,0,0); } /* 顶部透明 */
     footer { visibility: hidden; }
     
     /* 侧边栏 */
@@ -86,16 +80,6 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     
-    /* 侧边栏 Manual 按钮 (低调灰) */
-    [data-testid="stSidebar"] .stButton button {
-        background: #111 !important; border: 1px solid #333 !important;
-        color: #888 !important; font-size: 0.75rem !important; width: 100%;
-        margin-top: 20px;
-    }
-    [data-testid="stSidebar"] .stButton button:hover {
-        border-color: #FF4B4B !important; color: #FF4B4B !important;
-    }
-    
     /* 侧边栏 Ticker */
     .ticker-item { padding: 12px 0; border-bottom: 1px solid #1A1A1A; font-size: 0.85rem; }
     .ticker-title { color: #CCC; margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;}
@@ -115,16 +99,20 @@ st.markdown("""
         border-radius: 12px; margin-top: 20px; color: #CCC; line-height: 1.6;
     }
     
-    /* 底部 Expander 样式 */
+    /* 底部 Expander (Manual) 样式 */
     .streamlit-expanderHeader {
-        background-color: #0A0A0A !important; color: #666 !important; border: 1px solid #222 !important;
+        background-color: #0A0A0A !important; color: #888 !important; border: 1px solid #222 !important;
+        border-radius: 6px !important; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem !important;
     }
     
-    /* 手机端适配 */
+    /* 📱 手机端适配核心代码 */
     @media only screen and (max-width: 768px) {
-        h1 { font-size: 2.2rem !important; }
-        .stButton button { width: 100% !important; margin-top: 10px !important; }
+        h1 { font-size: 2.2rem !important; padding-bottom: 15px !important; }
+        .stButton button { width: 100% !important; margin-top: 10px !important; padding: 12px !important; }
         .market-card { padding: 15px !important; }
+        .report-box { font-size: 0.9rem !important; padding: 15px !important; }
+        /* 强制侧边栏在手机上行为正常 */
+        section[data-testid="stSidebar"] { width: 80% !important; } 
     }
 </style>
 """, unsafe_allow_html=True)
@@ -255,42 +243,7 @@ def consult_holmes(user_input, market_data):
 
 # ================= 🖥️ 5. MAIN INTERFACE =================
 
-# --- Manual 弹窗逻辑 (定义在前面以便复用) ---
-@st.dialog("Be Holmes Protocol", width="large")
-def show_manual():
-    lang_mode = st.radio("Display Language", ["中文", "English"], horizontal=True)
-    st.markdown("---")
-    
-    st.markdown("""
-    <div style="background:#111; padding:15px; border-radius:8px; border:1px solid #333; margin-bottom:20px;">
-        <strong style="color:#FF4B4B;">⚡ CORE ENGINE POWERED BY</strong>
-        <h3 style="margin:5px 0; color:white;">Exa.ai Neural Search</h3>
-        <p style="color:#666; font-size:0.8rem;">State-of-the-art Embeddings for cross-lingual intent mapping.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if lang_mode == "中文":
-        st.markdown("""
-        **1. 架构 (Architecture)**
-        Be Holmes 是基于 **RAG** 的情报决策终端。
-        * **语义层:** Exa.ai 将中文情报映射为链上实体。
-        * **推理层:** Gemini Pro 计算贝叶斯预期差。
-        **2. 操作 (Operation)**
-        * **注入情报:** 输入任何非结构化文本。
-        * **解码策略:** 系统识别“已定价”风险并输出 Buy/Wait 信号。
-        """)
-    else:
-        st.markdown("""
-        **1. Architecture**
-        **RAG-based** Intelligence Terminal.
-        * **Semantic Layer:** Exa.ai maps intent to assets.
-        * **Reasoning:** Gemini Pro calculates Expectation Gaps.
-        **2. Operation**
-        * **Inject Intel:** Input unstructured text.
-        * **Decode:** System identifies "Priced-in" risks.
-        """)
-
-# --- A. 侧边栏：实时行情 + 底部 Manual ---
+# --- A. 侧边栏：实时行情 ---
 with st.sidebar:
     st.markdown("### 📡 LIVE TICKER")
     if KEYS_LOADED:
@@ -310,24 +263,25 @@ with st.sidebar:
         except: st.warning("Connecting...")
     else:
         st.error("Keys Missing")
-
-    # 底部 Manual 按钮 (侧边栏版本)
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    if st.button("📘 PROTOCOL MANUAL"):
-        show_manual()
+    
+    st.markdown("---")
+    st.caption("ℹ️ Data from Polymarket Gamma API")
 
 # --- B. 主界面 ---
 st.title("Be Holmes")
-st.caption("THE GENIUS TRADER | V2.4 SIDEBAR FIXED")
+st.caption("THE GENIUS TRADER | V2.5 MOBILE PRO")
 
-# 状态栏
+# 状态栏 (提示侧边栏存在)
 if KEYS_LOADED:
-    st.markdown('<p class="status-bar">🟢 System Online | 📡 <span style="color:#444;">Live Feed in Sidebar (Top Left >)</span></p>', unsafe_allow_html=True)
+    st.markdown('<p class="status-bar">🟢 System Online | 📡 <span style="color:#555;">Live Feed in Sidebar (Top Left >)</span></p>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+# 输入区
 user_news = st.text_area("Intelligence Injection...", height=120, placeholder="Paste Intel here... (e.g. 特朗普宣布2月1日加征关税 / SpaceX IPO)")
 ignite_btn = st.button("🔍 DECODE ALPHA", use_container_width=True)
 
+# 执行逻辑
 if ignite_btn:
     if not KEYS_LOADED:
         st.error("❌ API Keys not found in Secrets.")
@@ -372,9 +326,42 @@ if ignite_btn:
         st.markdown("### 🧠 Strategic Report")
         st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
 
-# --- C. 底部 Manual (备用入口，方便手机端) ---
+# --- C. 底部 Manual (不喧宾夺主，专业范) ---
 st.markdown("<br><br><br>", unsafe_allow_html=True)
-with st.expander("📘 PROTOCOL MANUAL (MOBILE ACCESS)"):
-    # 为了复用逻辑，这里简单渲染一些核心信息，或者再次调用弹窗
-    if st.button("OPEN MANUAL DIALOG"):
-        show_manual()
+st.markdown("---")
+
+# 使用 Expander 折叠起来，默认不显示，不抢主界面
+with st.expander("📘 OPERATIONAL PROTOCOL & CREDIT"):
+    
+    # 1. Exa.ai 致谢 (专业卡片)
+    st.markdown("""
+    <div style="background:#0F0F0F; padding:20px; border-radius:8px; border:1px solid #333; margin-bottom:20px;">
+        <div style="font-size:0.7rem; color:#666; font-weight:bold; letter-spacing:1px; margin-bottom:5px;">CORE SEMANTIC ENGINE</div>
+        <div style="font-size:1.5rem; color:#FF4B4B; font-weight:900; margin-bottom:5px;">POWERED BY Exa.ai</div>
+        <div style="font-size:0.85rem; color:#888;">
+            Utilizing state-of-the-art Neural Embeddings for cross-lingual intent mapping and entity resolution.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 2. 专业协议内容
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### 🇨🇳 协议说明")
+        st.markdown("""
+        * **系统架构:** 基于 **RAG** 的异构金融数据决策终端。
+        * **语义层 (Semantic Layer):** 由 **Exa.ai** 提供支持，将中文模糊非结构化文本实时映射为链上资产实体。
+        * **推理层 (Inference Layer):** 集成 **Gemini Pro**，基于贝叶斯博弈论 (Bayesian Game Theory) 计算市场共识预期差。
+        * **信号定义:** * 🟢 **Aggressive Buy:** 市场定价偏差 > 30%。
+            * ⚪ **Priced-in:** 市场已充分消化该情报。
+        """)
+    with c2:
+        st.markdown("#### 🇺🇸 Protocol Specs")
+        st.markdown("""
+        * **Architecture:** **RAG-based** Heterogeneous Financial Decision Terminal.
+        * **Semantic Layer:** Powered by **Exa.ai**. Maps unstructured intent to on-chain assets via Neural Search.
+        * **Inference Layer:** **Gemini Pro** driven. Calculates Consensus Gaps using Bayesian models.
+        * **Signals:**
+            * 🟢 **Aggressive Buy:** Mispricing > 30%.
+            * ⚪ **Priced-in:** Information fully absorbed.
+        """)
