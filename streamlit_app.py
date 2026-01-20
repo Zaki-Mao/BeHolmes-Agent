@@ -516,38 +516,52 @@ else:
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
-# 自定义底部样式
+# 自定义底部样式 (中心化布局版)
 st.markdown("""
 <style>
+    /* 强制 Radio 组件居中 */
+    div.row-widget.stRadio > div {
+        justify-content: center;
+    }
+
     /* 协议文本容器 */
     .protocol-container {
         font-family: 'Inter', sans-serif;
         color: #cbd5e1; /* slate-300 */
         font-size: 0.95rem;
-        line-height: 1.7;
-        margin-top: 10px;
+        line-height: 1.8;
+        margin-top: 20px;
+        text-align: center; /* 全局居中 */
+        display: flex;
+        flex-direction: column;
+        align-items: center;
     }
     
-    /* 每一个步骤的样式 */
+    /* 每一个步骤的样式 - 改为居中块状风格 */
     .protocol-step {
-        margin-bottom: 15px;
-        padding-left: 15px;
-        border-left: 2px solid #dc2626; /* 红色光标风格 */
-        background: rgba(255, 255, 255, 0.02);
-        padding-top: 5px;
-        padding-bottom: 5px;
-        border-radius: 0 4px 4px 0;
+        margin-bottom: 25px;
+        padding: 15px 20px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03); /* 极淡的背景 */
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        max-width: 700px; /* 限制宽度，防止文字拉太长难看 */
+        width: 100%;
+        transition: all 0.3s;
+    }
+    .protocol-step:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
     }
     
     /* 步骤标题 */
     .protocol-title {
         font-weight: 700;
-        color: #f8fafc; /* slate-50 */
+        color: #ef4444; /* 使用红色高亮标题 */
         font-size: 1rem;
         letter-spacing: 0.5px;
         text-transform: uppercase;
         display: block;
-        margin-bottom: 4px;
+        margin-bottom: 8px;
     }
 
     /* 底部版权区 */
@@ -567,18 +581,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Expander 组件
-with st.expander("📁 Operational Protocol & System Architecture / 操作协议与系统架构"):
+# Expander 组件 - 纯英文标题，无 Emoji
+with st.expander("Operational Protocol & System Architecture"):
     
-    # 语言切换开关 (放在 Expander 内部顶部)
-    c1, c2 = st.columns([1, 5])
-    with c1:
-        lang_mode = st.radio(
-            "Language", 
-            ["EN", "CN"], 
-            horizontal=True, 
-            label_visibility="collapsed"
-        )
+    # 语言切换开关 (CSS 已强制其居中)
+    lang_mode = st.radio(
+        "Language", 
+        ["EN", "CN"], 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # 内容显示逻辑
     if lang_mode == "EN":
@@ -625,6 +639,7 @@ with st.expander("📁 Operational Protocol & System Architecture / 操作协议
         Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
 
 
 
