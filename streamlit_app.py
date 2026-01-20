@@ -640,50 +640,51 @@ with st.expander("Operational Protocol & System Architecture"):
     </div>
     """, unsafe_allow_html=True)
 
-# ================= ⚡ 底部实时滚动新闻条 (REAL-TIME CRYPTOPANIC TICKER) =================
+# ================= ⚡ 底部实时滚动新闻条 (诊断修复版) =================
 
-@st.cache_data(ttl=300) # 设置5分钟缓存，避免频繁消耗API额度
+@st.cache_data(ttl=300)
 def fetch_ticker_news():
-    # 1. 尝试从 Secrets 获取 API Key
-    api_key = st.secrets.get("CRYPTOPANIC_API_KEY", None)
-    
-    # 如果没有 Key，或者请求失败，使用备用模拟数据防止报错
-    fallback_news = [
-        "⚠️ API Key Missing: Please configure CRYPTOPANIC_API_KEY in secrets.",
-        "⚡ SYSTEM: Connecting to decentralized intelligence grid...",
-        "📈 MARKET: Waiting for live data stream."
-    ]
-    
-    if not api_key:
-        return fallback_news
-
     try:
-        # 2. 请求 CryptoPanic API (获取 Rising/Hot 新闻)
-        # filter=rising 表示获取当前正在变热的新闻
+        # 1. 获取 Key
+        api_key = st.secrets["CRYPTOPANIC_API_KEY"]
+        
+        # 2. 构造请求
+        # 增加 User-Agent 伪装成浏览器，防止被 API 当作机器人拦截
         url = f"https://cryptopanic.com/api/v1/posts/?auth_token={api_key}&public=true&filter=rising&kind=news"
-        resp = requests.get(url, timeout=5)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        
+        # 3. 发送请求 (超时时间延长到 10秒)
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        # 4. 诊断错误状态码
+        if resp.status_code != 200:
+            return [f"⚠️ API Error: Status {resp.status_code}", f"Msg: {resp.text[:60]}..."]
+            
         data = resp.json()
-        
         news_items = []
-        if "results" in data:
-            for item in data["results"][:10]: # 只取前10条
-                # 根据货币代码添加一点装饰 (可选)
-                currencies = item.get("currencies", [])
-                curr_tag = f"[{currencies[0]['code']}] " if currencies else "⚡ "
-                title = item["title"]
-                news_items.append(f"{curr_tag}{title}")
         
-        return news_items if news_items else fallback_news
+        if "results" in data:
+            for item in data["results"][:15]:
+                title = item["title"]
+                # 尝试获取代币代码
+                currencies = item.get("currencies")
+                code = f"[{currencies[0]['code']}]" if currencies else "⚡"
+                news_items.append(f"{code} {title}")
+        
+        if not news_items:
+            return ["⚠️ API Connected but returned NO news results."]
+            
+        return news_items
 
     except Exception as e:
-        # print(f"News Error: {e}") # Debug
-        return [
-            "⚡ NETWORK STATUS: Re-routing via neural nodes...",
-            "📉 DATA: Retrying connection to CryptoPanic feed..."
-        ]
+        # 5. 捕获具体的 Python 报错（比如 ConnectionError）
+        return [f"❌ System Error: {str(e)}"]
 
-# 获取新闻数据
+# 获取新闻
 news_list = fetch_ticker_news()
+
 
 # 拼接字符串
 ticker_text = " &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; /// &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ".join(news_list)
@@ -729,6 +730,7 @@ st.markdown(f"""
 </div>
 <br><br><br>
 """, unsafe_allow_html=True)
+
 
 
 
