@@ -482,13 +482,118 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-# Footer
-st.markdown("<br>", unsafe_allow_html=True)
-with st.expander("Explore Protocol & Credits"):
+# ================= 👇 6. 底部协议与说明 (PROTOCOL & MANUAL) =================
+
+st.markdown("<br><br>", unsafe_allow_html=True)
+
+# 自定义底部样式
+st.markdown("""
+<style>
+    /* 协议文本容器 */
+    .protocol-container {
+        font-family: 'Inter', sans-serif;
+        color: #cbd5e1; /* slate-300 */
+        font-size: 0.95rem;
+        line-height: 1.7;
+        margin-top: 10px;
+    }
+    
+    /* 每一个步骤的样式 */
+    .protocol-step {
+        margin-bottom: 15px;
+        padding-left: 15px;
+        border-left: 2px solid #dc2626; /* 红色光标风格 */
+        background: rgba(255, 255, 255, 0.02);
+        padding-top: 5px;
+        padding-bottom: 5px;
+        border-radius: 0 4px 4px 0;
+    }
+    
+    /* 步骤标题 */
+    .protocol-title {
+        font-weight: 700;
+        color: #f8fafc; /* slate-50 */
+        font-size: 1rem;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 4px;
+    }
+
+    /* 底部版权区 */
+    .credits-section {
+        text-align: center;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #334155;
+        color: #64748b;
+        font-size: 0.85rem;
+        font-family: monospace;
+    }
+    .credits-highlight {
+        color: #94a3b8;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Expander 组件
+with st.expander("📁 Operational Protocol & System Architecture / 操作协议与系统架构"):
+    
+    # 语言切换开关 (放在 Expander 内部顶部)
+    c1, c2 = st.columns([1, 5])
+    with c1:
+        lang_mode = st.radio(
+            "Language", 
+            ["EN", "CN"], 
+            horizontal=True, 
+            label_visibility="collapsed"
+        )
+
+    # 内容显示逻辑
+    if lang_mode == "EN":
+        st.markdown("""
+        <div class="protocol-container">
+            <div class="protocol-step">
+                <span class="protocol-title">1. Intelligence Injection (Input)</span>
+                User inputs unstructured natural language data—breaking news, social sentiment, or event-specific queries—into the system's intelligence context window.
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">2. Neural Semantic Mapping (Processing)</span>
+                Powered by <b>Exa.ai</b>, the engine converts input semantics into high-dimensional vector embeddings to identify correlated prediction markets, bypassing rigid keyword limitations.
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">3. Bayesian Alpha Decoding (Analysis)</span>
+                <b>Google Gemini</b> acts as the Macro-Analyst. It synthesizes market implied probabilities (Odds) with the input intelligence to calculate the "Expectation Gap"—determining if the news is priced-in or represents an alpha opportunity.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="protocol-container">
+            <div class="protocol-step">
+                <span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>
+                用户输入非结构化自然语言数据——无论是突发新闻、社交媒体情绪还是特定事件查询，系统将自动解析其语义核心。
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>
+                由 <b>Exa.ai</b> 驱动，系统将文本转化为高维向量嵌入（Embeddings），在 Polymarket 链上合约库中进行神经搜索，精准定位强相关预测市场。
+            </div>
+            <div class="protocol-step">
+                <span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span>
+                <b>Google Gemini</b> 作为宏观分析引擎，综合市场隐含概率（赔率）与输入情报，计算“预期差”，判断该信息是否已被市场定价 (Priced-in) 或存在套利空间。
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 底部版权 (Credits)
     st.markdown("""
-    <div style="text-align:center; color:#6b7280; font-size:0.9rem;">
-        Powered by <b>Exa.ai</b> & <b>Google Gemini</b><br>
-        Data source: Polymarket Gamma API
+    <div class="credits-section">
+        SYSTEM ARCHITECTURE POWERED BY<br>
+        <span class="credits-highlight">Exa.ai (Neural Search)</span> & 
+        <span class="credits-highlight">Google Gemini (Cognitive Core)</span><br><br>
+        Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
 
