@@ -36,7 +36,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================= 🎨 2. UI THEME (UPDATED FOR 3x4 GRID) =================
+# ================= 🎨 2. UI THEME (UPDATED FOR CLICKABLE CARDS) =================
 st.markdown("""
 <style>
     /* Import Fonts */
@@ -144,11 +144,11 @@ st.markdown("""
     }
 
     /* =================================================================
-       2. BOTTOM GRID STYLING (UPDATED FOR 3x4 LAYOUT)
+       2. BOTTOM GRID STYLING (3x4 Layout + Clickable)
        ================================================================= */
     .top10-container {
         width: 100%;
-        max-width: 1200px; /* Widened to fit 3 columns */
+        max-width: 1200px;
         margin: 60px auto 20px auto;
         padding: 0 20px;
     }
@@ -165,23 +165,17 @@ st.markdown("""
     /* 3 Columns Layout */
     .top10-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr); /* Force 3 columns */
+        grid-template-columns: repeat(3, 1fr);
         gap: 15px;
     }
 
-    /* Responsive: Tablet (2 cols) */
-    @media (max-width: 1000px) {
-        .top10-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
-    }
-    /* Responsive: Mobile (1 col) */
-    @media (max-width: 600px) {
-        .top10-grid {
-            grid-template-columns: 1fr;
-        }
-    }
+    /* Responsive */
+    @media (max-width: 1000px) { .top10-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .top10-grid { grid-template-columns: 1fr; } }
 
+    /* Card Styles 
+       UPDATED: Added text-decoration and color:inherit for <a> tag support 
+    */
     .market-item {
         background: rgba(17, 24, 39, 0.6);
         border: 1px solid #374151;
@@ -192,7 +186,12 @@ st.markdown("""
         justify-content: space-between;
         transition: all 0.2s;
         backdrop-filter: blur(5px);
-        min-height: 110px; /* Ensure uniform height */
+        min-height: 110px;
+        
+        /* New properties for Link behavior */
+        text-decoration: none !important;
+        color: inherit !important;
+        cursor: pointer;
     }
     .market-item:hover {
         border-color: #ef4444;
@@ -205,7 +204,6 @@ st.markdown("""
         font-weight: 500;
         margin-bottom: 12px;
         line-height: 1.4;
-        /* Truncate after 2 lines */
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
@@ -274,12 +272,10 @@ def search_with_exa(query):
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
 
-# Cache Top 12 Data (3x4 Layout)
+# Cache Top 12 Data
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
-        # 1. Update: limit=12 for 3x4 grid
-        # 2. Update: use /events endpoint to avoid duplicate sub-markets
         url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
         resp = requests.get(url, timeout=5).json()
         
@@ -288,18 +284,13 @@ def fetch_top_10_markets():
         if isinstance(resp, list):
             for event in resp:
                 try:
-                    # Get Event Title
                     title = event.get('title', 'Unknown Event')
-                    
-                    # Get markets under this event
                     event_markets = event.get('markets', [])
                     if not event_markets or not isinstance(event_markets, list):
                         continue
 
-                    # Strategy: Use the first market as representative for odds
                     m = event_markets[0]
                     
-                    # Parse Outcomes and Prices
                     outcomes = m.get('outcomes')
                     if isinstance(outcomes, str): outcomes = json.loads(outcomes)
                         
@@ -464,20 +455,21 @@ if ignite_btn:
                 
             st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
 
-# ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS (3x4 Grid) =================
+# ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS =================
 
 top10_markets = fetch_top_10_markets()
 
 if top10_markets:
-    # Use join to create clean HTML string
+    # UPDATED: Use <a> tag instead of <div> for the card wrapper
+    # Added href linking to Polymarket event page
     cards_html = "".join([f"""
-    <div class="market-item">
+    <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
         <div class="m-title" title="{m['title']}">{m['title']}</div>
         <div class="m-odds">
             <span class="tag-yes">Yes {m['yes']}¢</span>
             <span class="tag-no">No {m['no']}¢</span>
         </div>
-    </div>""" for m in top10_markets])
+    </a>""" for m in top10_markets])
 
     final_html = f"""
     <div class="top10-container">
