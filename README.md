@@ -1,101 +1,94 @@
-# 🕵️‍♂️ Be Holmes
+# Be Holmes | Prediction Market Intelligence Terminal
 
-### *The Sherlock of Prediction Markets.*
-**Event-Driven Intelligence | Causal Reasoning | Alpha Hunter**
+## Overview
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://www.beholmes.com)
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![Gemini 2.5](https://img.shields.io/badge/AI-Gemini%202.5%20Flash-orange)
-![Polymarket API](https://img.shields.io/badge/Data-Polymarket%20Gamma-purple)
-![License MIT](https://img.shields.io/badge/license-MIT-green)
+Be Holmes is an AI-native decision support system engineered to bridge the gap between unstructured natural language intelligence and decentralized prediction markets (e.g., Polymarket).
 
----
+In the domain of event derivatives, information asymmetry often exists between breaking news and on-chain probability pricing. Be Holmes functions as an end-to-end RAG (Retrieval-Augmented Generation) agent that ingests raw intelligence, semantically maps it to live prediction contracts, and utilizes Large Language Models (LLMs) to compute an "Alpha Verdict" based on Bayesian inference logic.
 
-> *"Data, data, data! I can't make bricks without clay."* — Sherlock Holmes
->
-> In the chaotic world of prediction markets, information is everywhere, but **truth** is scarce. **Be Holmes** is an autonomous AI agent that acts as your private detective for financial events. It doesn't just read the news; it deduces the future.
+## System Architecture & Logic
 
----
+The core operational logic of Be Holmes follows a strict three-stage pipeline designed to eliminate hallucination and focus on actionable insights.
 
-## 🌐 Live Investigation
-**Access the Terminal:** 👉 **[www.beholmes.com](https://www.beholmes.com)**
+### 1. Intelligence Injection (Input Layer)
+The user inputs unstructured text into the system. This can be breaking news headlines, social sentiment, geopolitical rumors, or specific event queries. The system does not rely on rigid keyword matching; instead, it analyzes the semantic intent of the input.
 
-*(No login required. Just enter the market URL and let the detective work.)*
+### 2. Neural Semantic Mapping (Retrieval Layer)
+* **Engine:** Exa.ai (Neural Search)
+* **Process:** The system converts the input intelligence into high-dimensional vector embeddings. It then queries the web specifically targeting prediction market domains (Polymarket).
+* **Goal:** This allows the system to identify correlated betting markets even if the keywords do not match exactly (e.g., mapping "Trump's legal issues" to a specific "Presidential Pardon" contract).
 
----
+### 3. Bayesian Alpha Decoding (Analysis Layer)
+* **Engine:** Google Gemini (Cognitive Core)
+* **Data Stream:** Polymarket Gamma API (Real-time Odds & Volume)
+* **Process:** The system synthesizes two distinct data sets:
+    1.  **The Intel:** The semantic implication of the user's input.
+    2.  **The Market:** The current implied probability (Price) and liquidity (Volume) of the relevant contracts.
+* **Output:** The LLM acts as a macro-analyst to determine if the news is already "priced-in" or if a divergence exists between the event's real-world probability and its market price.
 
-## 🧐 The Case (What is this?)
+## Features
 
-**Be Holmes** is a next-generation market analysis engine designed to capture **Alpha** in global prediction markets (like Polymarket).
+* **Semantic Market Discovery:** Locates prediction markets based on meaning rather than keywords using neural search architectures.
+* **Real-Time Odds Integration:** Fetches live pricing (Yes/No shares) and volume data directly from the Polymarket Gamma API.
+* **Multi-Outcome Support:** Automatically normalizes data for both binary markets and complex multi-choice markets.
+* **Institutional-Grade Briefing:** Generates concise, rational, and data-driven analysis reports focusing on "Priced-in Checks" and "Bluff vs. Reality."
+* **Live Intelligence Ticker:** Integrated real-time news feed via CryptoPanic Developer API (v2) to track market-moving events instantly.
 
-Unlike traditional bots that rely on simple sentiment analysis, Be Holmes uses **Second-order Causal Reasoning** to bridge the gap between unstructured breaking news and structured financial probabilities.
+## Tech Stack
 
-### The Detective's Toolkit (Core Features)
+* **Frontend/App Framework:** Python (Streamlit)
+* **Neural Search:** Exa.ai SDK
+* **Inference Engine:** Google Gemini (Generative AI)
+* **Market Data:** Polymarket Gamma API (REST)
+* **News Data:** CryptoPanic API v2
 
-* **🔍 The Magnifying Glass (Real-time RAG):** Instantly retrieves and verifies cross-platform intelligence (News, Social Media, On-chain data) to gather "evidence."
-* **🧠 The Mind Palace (Causal Inference Engine):** Powered by **Google Gemini 2.5**, it constructs a causal graph of events to simulate potential outcomes before they happen.
-* **⚖️ The Verdict (Probability Calibration):** Converts abstract analysis into concrete trading probabilities (0-100%) to identify mispriced markets.
-* **🗣️ Bilingual Interrogation:** Speaks your language. Inputs in English get English deductions; inputs in Chinese get Chinese insights. *(Coming Soon)*
+## Installation
 
----
+### Prerequisites
 
-## 🛠️ The Gadgets (Tech Stack)
+* Python 3.8+
+* API Keys for Exa.ai, Google Gemini, and CryptoPanic.
 
-* **Brain:** Google Gemini 2.5 Flash (via API)
-* **Eyes:** Custom Web Scrapers & Polymarket Gamma API
-* **Face:** Streamlit (Hosted on Community Cloud)
-* **Nerve Center:** Python 3.10+
-* **Disguise:** Cloudflare Custom Domain & Worker Proxy
+### Setup
 
----
-
-## 🚀 How to Hire the Detective (Local Run)
-
-Want to run the investigation on your own machine?
-
-1.  **Clone the Repository**
+1.  **Clone the repository**
     ```bash
-    git clone [https://github.com/YourUsername/BeHolmes-Agent.git](https://github.com/YourUsername/BeHolmes-Agent.git)
-    cd BeHolmes-Agent
+    git clone [https://github.com/your-username/be-holmes.git](https://github.com/your-username/be-holmes.git)
+    cd be-holmes
     ```
 
-2.  **Install Requirements**
+2.  **Install dependencies**
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Set Up Secrets**
-    Create a `.streamlit/secrets.toml` file and add your API keys:
+3.  **Configure API Keys**
+    Create a `.streamlit/secrets.toml` file in the root directory and add your credentials. Ensure strict TOML formatting:
+
     ```toml
-    GOOGLE_API_KEY = "your_gemini_key"
+    EXA_API_KEY = "your_exa_key_here"
+    GOOGLE_API_KEY = "your_gemini_key_here"
+    CRYPTOPANIC_API_KEY = "your_cryptopanic_key_here"
     ```
 
-4.  **Start the Engine**
+4.  **Execute the application**
     ```bash
     streamlit run streamlit_app.py
     ```
 
----
+## Usage Protocol
 
-## 🗺️ The Roadmap
+1.  **Initialize:** Launch the terminal. The bottom ticker will immediately begin streaming real-time rising news.
+2.  **Input:** Paste a news snippet or type a query into the main context window (e.g., "Fed signals interest rate cuts in March").
+3.  **Execute:** Click "Decode Alpha."
+4.  **Review:**
+    * **Market Cards:** Observe the identified markets, current odds, and volume.
+    * **Verdict:** Read the AI-generated briefing to understand the implied probability versus the intelligence provided.
 
-- [x] **Phase 1: The Awakening** - Core reasoning engine & Polymarket integration.
-- [x] **Phase 2: The Identity** - Brand upgrade to "Be Holmes" & Domain launch.
-- [ ] **Phase 3: The Polyglot** - Auto-detect language (EN/CN) for native responses.
-- [ ] **Phase 4: The Network** - Multi-agent debate mode (Watson vs. Holmes).
+## Disclaimer
 
----
-
-## 🤝 Contributing
-
-The game is afoot! If you have ideas on how to improve the deduction logic or expand the evidence gathering sources, feel free to open a PR.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This software is for informational and research purposes only. It does not constitute financial advice, investment recommendations, or an endorsement of any specific prediction market. The "Alpha Verdicts" are generated by probabilistic AI models and should not be the sole basis for financial decisions. Users assume full responsibility for their trading activities.
 
 ---
-
-<p align="center">
-  <i>Built with 🕵️‍♂️ & ☕ by <a href="https://www.beholmes.com">Zaki</a></i>
-</p>
+**Version:** 1.0.0
+**License:** MIT
