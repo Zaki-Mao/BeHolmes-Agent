@@ -1,5 +1,4 @@
-supabase
-streamlit
-requests
+reflex
 google-generativeai
-exa_py
+exa-py
+requests
