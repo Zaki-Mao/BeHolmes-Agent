@@ -1,5 +1,5 @@
+supabase
 streamlit
 requests
 google-generativeai
-pandas
 exa_py
