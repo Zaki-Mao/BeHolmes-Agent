@@ -3,6 +3,9 @@ import requests
 import json
 import google.generativeai as genai
 import re
+import hashlib
+import base64
+import os
 from supabase import create_client, Client
 
 # ================= 🔐 0. KEY MANAGEMENT =================
@@ -42,30 +45,70 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================= 🔐 AUTHENTICATION LOGIC (Hardened) =================
+# ⚠️ 必须设置和你 Supabase 后台 Redirect URL 完全一致（不要带 hash #）
+REDIRECT_URL = "https://beholmes.streamlit.app"
+
+# ================= 🔐 AUTHENTICATION LOGIC (MANUAL PKCE) =================
+def get_auth_url():
+    """手动生成带 State 的登录链接，解决 Streamlit 刷新丢失 Verifier 的问题"""
+    # 1. 生成随机 Verifier (钥匙)
+    verifier = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip('=')
+    
+    # 2. 生成 Challenge (锁)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
+    
+    # 3. 把钥匙藏在 state 参数里 (这样它能跟着 URL 转一圈回来)
+    state_payload = base64.urlsafe_b64encode(json.dumps({"verifier": verifier}).encode()).decode()
+    
+    # 4. 拼接 Supabase 授权链接
+    auth_url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&code_challenge={challenge}&code_challenge_method=s256&redirect_to={REDIRECT_URL}&state={state_payload}"
+    return auth_url
+
 def handle_auth():
-    """
-    处理登录回调。
-    增加了防抖逻辑：如果 session 已经存在，就不再处理 code，防止死循环。
-    """
+    """处理回调，手动交换 Token"""
     if 'user' not in st.session_state:
         st.session_state.user = None
 
-    # 如果已经登录，直接返回，不做任何 URL 处理，防止刷新循环
     if st.session_state.user:
         return
 
-    try:
-        query_params = st.query_params
-        # 只有在 URL 里有 code 且 当前未登录 时才执行交换
-        if "code" in query_params:
-            res = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
-            st.session_state.user = res.user
-            # 登录成功后，清除 URL 参数并强制刷新一次，彻底进入“已登录”状态
-            st.query_params.clear()
-            st.rerun()
-    except Exception as e:
-        st.error(f"Auth Error: {e}")
+    query_params = st.query_params
+    
+    # 检查 URL 里是否有 code 和 state
+    if "code" in query_params and "state" in query_params:
+        try:
+            code = query_params["code"]
+            state_b64 = query_params["state"]
+            
+            # 1. 取回钥匙
+            state_json = json.loads(base64.urlsafe_b64decode(state_b64).decode())
+            verifier = state_json["verifier"]
+            
+            # 2. 手动向 Supabase 发请求换取 Token (绕过 python 库的自动检查)
+            token_url = f"{SUPABASE_URL}/auth/v1/token?grant_type=authorization_code"
+            headers = {"apikey": SUPABASE_KEY, "Content-Type": "application/json"}
+            data = {
+                "code": code,
+                "code_verifier": verifier,
+                "redirect_uri": REDIRECT_URL
+            }
+            
+            resp = requests.post(token_url, headers=headers, json=data)
+            
+            if resp.status_code == 200:
+                # 3. 登录成功，保存 Session
+                session_data = resp.json()
+                supabase.auth.set_session(session_data["access_token"], session_data["refresh_token"])
+                st.session_state.user = supabase.auth.get_user().user
+                
+                # 4. 清理 URL
+                st.query_params.clear()
+                st.rerun()
+            else:
+                st.error(f"Login Failed: {resp.text}")
+                
+        except Exception as e:
+            st.error(f"Auth Logic Error: {e}")
 
 if AUTH_LOADED:
     handle_auth()
@@ -74,7 +117,6 @@ if AUTH_LOADED:
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
-
     .stApp {
         background-image: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.9)), 
                           url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
@@ -86,11 +128,10 @@ st.markdown("""
     header[data-testid="stHeader"] { background-color: transparent !important; }
     [data-testid="stToolbar"] { visibility: hidden; }
     [data-testid="stDecoration"] { visibility: hidden; }
-
     .hero-title {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
-        font-size: 3.5rem; /* 稍微调小一点以免太占地 */
+        font-size: 3.5rem;
         color: #ffffff;
         text-align: center;
         letter-spacing: -2px;
@@ -106,8 +147,6 @@ st.markdown("""
         margin-bottom: 30px;
         font-weight: 400;
     }
-
-    /* Tab Styling */
     .stTabs [data-baseweb="tab-list"] {
         justify-content: center;
         background-color: transparent;
@@ -122,8 +161,6 @@ st.markdown("""
         color: #ffffff;
         border-bottom: 2px solid #dc2626;
     }
-
-    /* Card & Textarea Styles (Keep Existing) */
     .stTextArea textarea {
         background-color: rgba(31, 41, 55, 0.6) !important;
         color: #ffffff !important;
@@ -143,8 +180,6 @@ st.markdown("""
         max-width: 800px;
         backdrop-filter: blur(8px);
     }
-    
-    /* Login Button */
     a[href^="https://accounts.google.com"], a[href*="supabase.co"] {
         display: inline-flex;
         align-items: center;
@@ -163,8 +198,6 @@ st.markdown("""
         transform: scale(1.05);
         box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
     }
-    
-    /* Profile Card */
     .profile-card {
         background: rgba(31, 41, 55, 0.5);
         border: 1px solid #4b5563;
@@ -177,11 +210,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE (Keep Existing) =================
-# ... (这里省略了中间没有变动的 search_with_exa, fetch_top_10, consult_holmes 函数，
-# ...  为了节省篇幅，请保持原本这些函数的代码不变，逻辑完全一致)
-# ...  👇 必须把原本的 helper functions 放在这里 👇
-
+# ================= 🧠 3. LOGIC CORE =================
 def detect_language(text):
     for char in text:
         if '\u4e00' <= char <= '\u9fff': return "CHINESE"
@@ -334,29 +363,23 @@ def consult_holmes(user_input, market_data):
         return model.generate_content(prompt).text
     except Exception as e: return f"AI Error: {e}"
 
-# ================= 🖥️ 4. MAIN INTERFACE (UI重构) =================
+# ================= 🖥️ 4. MAIN INTERFACE =================
 
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
 
-# 🌟 状态判断：已登录 vs 未登录
 if st.session_state.user:
-    # ====== 已登录界面 (Tab 结构) ======
+    # ====== 已登录 ======
     st.markdown(f'<p class="hero-subtitle">Welcome back, {st.session_state.user.email}</p>', unsafe_allow_html=True)
-    
-    # 定义两个标签页：情报台 & 个人中心
     tab_research, tab_profile = st.tabs(["🔍 Decode Alpha", "👤 My Profile"])
     
-    # --- Tab 1: 研究主页 (原来的功能) ---
     with tab_research:
         st.markdown("<br>", unsafe_allow_html=True)
         _, mid, _ = st.columns([1, 6, 1])
         with mid:
             user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
-            
             _, btn_col, _ = st.columns([1, 2, 1])
             with btn_col:
                 ignite_btn = st.button("Decode Alpha", use_container_width=True)
-
             if ignite_btn:
                 if not KEYS_LOADED:
                     st.error("🔑 API Keys not found in Secrets.")
@@ -371,7 +394,6 @@ if st.session_state.user:
                             st.write("Calculating Probabilities...")
                             report = consult_holmes(user_news, matches)
                             status.update(label="Analysis Complete", state="complete", expanded=False)
-
                         if matches:
                             m = matches[0]
                             st.markdown(f"""
@@ -391,17 +413,13 @@ if st.session_state.user:
                             """, unsafe_allow_html=True)
                         st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
 
-    # --- Tab 2: 个人中心 (新增) ---
     with tab_profile:
         st.markdown(f"""
         <div class="profile-card">
             <h3>👤 User Profile</h3>
             <p style="color:#9ca3af; margin-bottom:20px;">{st.session_state.user.email}</p>
-            <p style="color:#6b7280; font-size:0.8rem;">ID: {st.session_state.user.id}</p>
         </div>
         """, unsafe_allow_html=True)
-        
-        # 退出登录按钮放在这里
         _, logout_col, _ = st.columns([1, 1, 1])
         with logout_col:
             if st.button("Sign Out", use_container_width=True):
@@ -409,7 +427,6 @@ if st.session_state.user:
                 st.session_state.user = None
                 st.rerun()
 
-    # --- 底部市场推荐 (仅在登录后显示) ---
     st.markdown("<br><hr style='border-color:#374151'><br>", unsafe_allow_html=True)
     top10_markets = fetch_top_10_markets()
     if top10_markets:
@@ -424,21 +441,15 @@ if st.session_state.user:
         st.markdown(f"""<div class="top10-container"><div class="top10-header">Trending on Polymarket</div><div class="top10-grid">{cards_html}</div></div>""", unsafe_allow_html=True)
 
 else:
-    # ====== 未登录界面 (只显示 Login 按钮) ======
+    # ====== 未登录 ======
     st.markdown('<p class="hero-subtitle">Login to access neural prediction market analysis.</p>', unsafe_allow_html=True)
-    
     if AUTH_LOADED:
         try:
-            # 务必替换这里的 URL 为你真实的 Streamlit URL
-            auth_resp = supabase.auth.sign_in_with_oauth({
-                "provider": "google",
-                "options": {
-                    "redirectTo": "https://be-holmes.streamlit.app" 
-                }
-            })
+            # 这里的 URL 由我们的函数手动生成
+            login_url = get_auth_url()
             st.markdown(f"""
             <div style="text-align: center; margin-top: 40px;">
-                <a href="{auth_resp.url}" target="_blank">
+                <a href="{login_url}" target="_blank">
                     Login with Google to Decode Alpha
                 </a>
             </div>
@@ -448,7 +459,6 @@ else:
     else:
         st.error("Authentication Service Unavailable.")
 
-    # 底部协议 (未登录时也显示)
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     with st.expander("Operational Protocol"):
         st.write("System requires authentication for alpha decoding.")
