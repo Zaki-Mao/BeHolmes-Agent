@@ -3,20 +3,28 @@ import requests
 import json
 import google.generativeai as genai
 import re
+from supabase import create_client, Client
 
 # ================= 🔐 0. KEY MANAGEMENT =================
+# 1. 加载 API Keys
 try:
     EXA_API_KEY = st.secrets["EXA_API_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
     KEYS_LOADED = True
-except FileNotFoundError:
+except (FileNotFoundError, KeyError):
     EXA_API_KEY = None
     GOOGLE_API_KEY = None
     KEYS_LOADED = False
-except KeyError:
-    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
-    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
-    KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
+
+# 2. 加载 Supabase (用于登录)
+try:
+    SUPABASE_URL = st.secrets["supabase"]["url"]
+    SUPABASE_KEY = st.secrets["supabase"]["key"]
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    AUTH_LOADED = True
+except (FileNotFoundError, KeyError):
+    AUTH_LOADED = False
+    st.error("⚠️ Supabase Secrets Missing. Please check secrets.toml")
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -36,10 +44,35 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================= 🎨 2. UI THEME (UPDATED FOR CLICKABLE CARDS) =================
+# ================= 🔐 AUTHENTICATION LOGIC =================
+def handle_auth():
+    """处理用户登录状态和回调"""
+    # 1. 检查 Session 中是否有用户信息
+    if 'user' not in st.session_state:
+        st.session_state.user = None
+
+    # 2. 处理 Google 登录回来的回调 (PKCE Flow)
+    # 当 Google 登录成功跳回时，URL 会带上 ?code=...
+    try:
+        query_params = st.query_params
+        if "code" in query_params and not st.session_state.user:
+            # 用 code 换取 session
+            res = supabase.auth.exchange_code_for_session({"auth_code": query_params["code"]})
+            st.session_state.user = res.user
+            # 清除 URL 中的 code，防止刷新报错
+            st.query_params.clear()
+            st.rerun()
+    except Exception as e:
+        # 登录出错时不崩溃，只是打印日志
+        print(f"Auth Error: {e}")
+
+# 执行 Auth 检查
+if AUTH_LOADED:
+    handle_auth()
+
+# ================= 🎨 2. UI THEME =================
 st.markdown("""
 <style>
-    /* Import Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
 
     /* 1. Global Background */
@@ -79,7 +112,7 @@ st.markdown("""
         font-weight: 400;
     }
 
-    /* 4. Input Field Styling (已修复：左对齐 + 字体优化) */
+    /* Input Field Styling */
     div[data-testid="stVerticalBlock"] > div {
         display: flex;
         flex-direction: column;
@@ -92,25 +125,20 @@ st.markdown("""
         color: #ffffff !important;
         border: 1px solid #374151 !important;
         border-radius: 16px !important;
-        
-        /* 修改点在这里：左对齐，调整内边距，调整字号 */
         padding: 15px 20px !important; 
-        font-size: 1rem !important; /* 从 1.1rem 改为 1rem */
-        text-align: left !important; /* 从 center 改为 left */
-        line-height: 1.6 !important; /* 增加行高，让中文更易读 */
-        
+        font-size: 1rem !important;
+        text-align: left !important;
+        line-height: 1.6 !important;
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
     }
-    
-    /* Input Focus - Red Glow */
     .stTextArea textarea:focus {
         border-color: rgba(239, 68, 68, 0.8) !important;
         box-shadow: 0 0 15px rgba(220, 38, 38, 0.3) !important;
         background-color: rgba(31, 41, 55, 0.9) !important;
     }
 
-    /* 3. Button Styling: Red Gradient */
+    /* Button Styling: Red Gradient */
     div.stButton > button:first-child {
         background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
         background-size: 200% auto !important;
@@ -124,16 +152,34 @@ st.markdown("""
         transition: 0.5s !important;
         box-shadow: 0 0 20px rgba(0,0,0,0.5) !important;
     }
-    
     div.stButton > button:first-child:hover {
         background-position: right center !important;
         transform: scale(1.05) !important;
         box-shadow: 0 0 30px rgba(220, 38, 38, 0.6) !important;
         border-color: #fca5a5 !important;
     }
-    
     div.stButton > button:first-child:active {
         transform: scale(0.98) !important;
+    }
+
+    /* Google Login Button Styling (Override link button) */
+    a[href^="https://accounts.google.com"], a[href*="supabase.co"] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background-color: white !important;
+        color: #333 !important;
+        font-weight: 600 !important;
+        padding: 12px 30px !important;
+        border-radius: 50px !important;
+        text-decoration: none !important;
+        transition: all 0.3s ease !important;
+        border: 1px solid #ddd !important;
+        margin-top: 10px;
+    }
+    a[href*="supabase.co"]:hover {
+        transform: scale(1.05);
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
     }
 
     /* Result Card */
@@ -228,6 +274,53 @@ st.markdown("""
         border-radius: 4px;
         font-weight: 600;
     }
+    
+    /* Footer Styling */
+    div.row-widget.stRadio > div { justify-content: center; }
+    .protocol-container {
+        font-family: 'Inter', sans-serif;
+        color: #cbd5e1;
+        font-size: 0.95rem;
+        line-height: 1.8;
+        margin-top: 20px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .protocol-step {
+        margin-bottom: 25px;
+        padding: 15px 20px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        max-width: 700px;
+        width: 100%;
+        transition: all 0.3s;
+    }
+    .protocol-step:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    .protocol-title {
+        font-weight: 700;
+        color: #ef4444;
+        font-size: 1rem;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 8px;
+    }
+    .credits-section {
+        text-align: center;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #334155;
+        color: #64748b;
+        font-size: 0.85rem;
+        font-family: monospace;
+    }
+    .credits-highlight { color: #94a3b8; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -247,29 +340,39 @@ def generate_english_keywords(user_text):
     except: return user_text
 
 def search_with_exa(query):
-    if not EXA_AVAILABLE or not EXA_API_KEY: return [], query
+    # 1. 检查 Key 是否存在
+    if not EXA_AVAILABLE or not EXA_API_KEY: 
+        st.warning("⚠️ Exa API Key missing. Skipping neural search.")
+        return [], query
+    
     search_query = generate_english_keywords(query)
     markets_found, seen_ids = [], set()
+    
     try:
         exa = Exa(EXA_API_KEY)
         search_response = exa.search(
             f"prediction market about {search_query}",
             num_results=4, type="neural", include_domains=["polymarket.com"]
         )
-        for result in search_response.results:
-            match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
-            if match:
-                slug = match.group(1)
-                if slug not in ['profile', 'login', 'leaderboard', 'rewards'] and slug not in seen_ids:
-                    market_data = fetch_poly_details(slug)
-                    if market_data:
-                        markets_found.extend(market_data)
-                        seen_ids.add(slug)
-    except Exception as e: print(f"Search error: {e}")
+        if search_response and search_response.results:
+            for result in search_response.results:
+                match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
+                if match:
+                    slug = match.group(1)
+                    if slug not in ['profile', 'login', 'leaderboard', 'rewards'] and slug not in seen_ids:
+                        market_data = fetch_poly_details(slug)
+                        if market_data:
+                            markets_found.extend(market_data)
+                            seen_ids.add(slug)
+    except Exception as e:
+        error_msg = str(e)
+        if "402" in error_msg or "quota" in error_msg.lower() or "limit" in error_msg.lower():
+            st.error("🚨 Exa API Limit Reached. Please check billing.")
+        else:
+            print(f"Search error: {e}")
+            
     return markets_found, search_query
 
-# Cache Top 12 Data
-# 缓存 Top 12 数据 - 逻辑修正版 (修复 Yes/No 价格反转)
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
@@ -287,7 +390,7 @@ def fetch_top_10_markets():
                     if not event_markets or not isinstance(event_markets, list):
                         continue
 
-                    # 1. 过滤与排序 (保持不变：过滤已关闭市场，按交易量排序)
+                    # 1. 过滤与排序
                     active_markets = []
                     for m in event_markets:
                         if m.get('closed') is True: continue
@@ -311,12 +414,7 @@ def fetch_top_10_markets():
                     yes_price = 0
                     no_price = 0
                     
-                    # =======================================================
-                    # 🌟 核心修复逻辑
-                    # =======================================================
-                    
                     # 场景 A: 明确的 Yes/No 市场
-                    # 必须找到 "Yes" 所在的索引位置，直接取那个价格
                     if "Yes" in outcomes and "No" in outcomes:
                         try:
                             yes_index = outcomes.index("Yes")
@@ -324,12 +422,10 @@ def fetch_top_10_markets():
                             yes_price = int(yes_raw * 100)
                             no_price = 100 - yes_price
                         except:
-                            # 兜底：如果出错，默认取第一个
                             yes_price = int(float(prices[0]) * 100)
                             no_price = 100 - yes_price
 
-                    # 场景 B: 多选项市场 (如 "<250k", "250k-500k")
-                    # 这种情况下，Outcome 里没有 "Yes"，我们保持原策略：取概率最高的那个显示
+                    # 场景 B: 多选项市场
                     else:
                         max_price = max([float(p) for p in prices])
                         yes_price = int(max_price * 100)
@@ -431,63 +527,99 @@ def consult_holmes(user_input, market_data):
 
 # ================= 🖥️ 4. MAIN INTERFACE =================
 
-# 4.1 Hero Section
+# 4.1 Sidebar for User Info (Logout)
+with st.sidebar:
+    if st.session_state.user:
+        st.write(f"Logged in as: {st.session_state.user.email}")
+        if st.button("Logout"):
+            supabase.auth.sign_out()
+            st.session_state.user = None
+            st.rerun()
+
+# 4.2 Hero Section
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
 st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
 
-# 4.2 Search Section
+# 4.3 Search Section (Conditionally Rendered)
 _, mid, _ = st.columns([1, 6, 1])
+
 with mid:
-    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+    # 🌟 核心逻辑：如果已登录，显示搜索框；如果未登录，显示登录按钮
+    if st.session_state.user:
+        user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+        
+        # 按钮区
+        _, btn_col, _ = st.columns([1, 2, 1])
+        with btn_col:
+            ignite_btn = st.button("Decode Alpha", use_container_width=True)
 
-# 4.3 Button Section
-_, btn_col, _ = st.columns([1, 2, 1])
-with btn_col:
-    ignite_btn = st.button("Decode Alpha", use_container_width=True)
+        # 执行逻辑
+        if ignite_btn:
+            if not KEYS_LOADED:
+                st.error("🔑 API Keys not found in Secrets.")
+            elif not user_news:
+                st.warning("Please enter intelligence to analyze.")
+            else:
+                with st.container():
+                    st.markdown("---")
+                    with st.status("Running Neural Analysis...", expanded=True) as status:
+                        st.write("Mapping Semantics...")
+                        matches, keyword = search_with_exa(user_news)
+                        st.write("Calculating Probabilities...")
+                        report = consult_holmes(user_news, matches)
+                        status.update(label="Analysis Complete", state="complete", expanded=False)
 
-# 4.4 Execution Logic
-if ignite_btn:
-    if not KEYS_LOADED:
-        st.error("🔑 API Keys not found in Secrets.")
-    elif not user_news:
-        st.warning("Please enter intelligence to analyze.")
+                    if matches:
+                        m = matches[0]
+                        st.markdown(f"""
+                        <div class="market-card">
+                            <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
+                            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                                <div>
+                                    <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
+                                    <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
+                                    <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
+    
     else:
-        with st.container():
-            st.markdown("---")
-            with st.status("Running Neural Analysis...", expanded=True) as status:
-                st.write("Mapping Semantics...")
-                matches, keyword = search_with_exa(user_news)
-                st.write("Calculating Probabilities...")
-                report = consult_holmes(user_news, matches)
-                status.update(label="Analysis Complete", state="complete", expanded=False)
-
-            if matches:
-                m = matches[0]
+        # 🛑 未登录状态：显示 Google 登录按钮
+        if AUTH_LOADED:
+            # 生成 Google 登录链接
+            try:
+                # 获取当前的 Streamlit App URL (用于重定向回来，虽然在 Supabase 后台配置了，但这里显式调用更安全)
+                # 注意：redirect_to 必须和 Supabase 后台 Allow List 一致
+                auth_resp = supabase.auth.sign_in_with_oauth({
+                    "provider": "google",
+                    "options": {
+                        "redirectTo": "https://be-holmes.streamlit.app" # 替换成你真实的 App URL，如果是本地测试用 http://localhost:8501
+                    }
+                })
+                # 显示一个看起来像按钮的链接
                 st.markdown(f"""
-                <div class="market-card">
-                    <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
-                    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-                        <div>
-                            <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
-                            <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
-                        </div>
-                        <div style="text-align:right;">
-                            <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
-                            <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
-                        </div>
-                    </div>
+                <div style="text-align: center; margin-top: 20px;">
+                    <a href="{auth_resp.url}" target="_self">
+                        Login with Google to Decode Alpha
+                    </a>
                 </div>
                 """, unsafe_allow_html=True)
-                
-            st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Login Config Error: {e}")
+        else:
+            st.error("Authentication Service Unavailable.")
 
 # ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS =================
 
 top10_markets = fetch_top_10_markets()
 
 if top10_markets:
-    # UPDATED: Use <a> tag instead of <div> for the card wrapper
-    # Added href linking to Polymarket event page
     cards_html = "".join([f"""
     <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
         <div class="m-title" title="{m['title']}">{m['title']}</div>
@@ -512,79 +644,12 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-# ================= 👇 6. 底部协议与说明 (PROTOCOL & MANUAL) =================
+# ================= 👇 6. 底部协议与说明 =================
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
-# 自定义底部样式 (中心化布局版)
-st.markdown("""
-<style>
-    /* 强制 Radio 组件居中 */
-    div.row-widget.stRadio > div {
-        justify-content: center;
-    }
-
-    /* 协议文本容器 */
-    .protocol-container {
-        font-family: 'Inter', sans-serif;
-        color: #cbd5e1; /* slate-300 */
-        font-size: 0.95rem;
-        line-height: 1.8;
-        margin-top: 20px;
-        text-align: center; /* 全局居中 */
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    /* 每一个步骤的样式 - 改为居中块状风格 */
-    .protocol-step {
-        margin-bottom: 25px;
-        padding: 15px 20px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.03); /* 极淡的背景 */
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        max-width: 700px; /* 限制宽度，防止文字拉太长难看 */
-        width: 100%;
-        transition: all 0.3s;
-    }
-    .protocol-step:hover {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    /* 步骤标题 */
-    .protocol-title {
-        font-weight: 700;
-        color: #ef4444; /* 使用红色高亮标题 */
-        font-size: 1rem;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        display: block;
-        margin-bottom: 8px;
-    }
-
-    /* 底部版权区 */
-    .credits-section {
-        text-align: center;
-        margin-top: 30px;
-        padding-top: 20px;
-        border-top: 1px solid #334155;
-        color: #64748b;
-        font-size: 0.85rem;
-        font-family: monospace;
-    }
-    .credits-highlight {
-        color: #94a3b8;
-        font-weight: 600;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Expander 组件 - 纯英文标题，无 Emoji
 with st.expander("Operational Protocol & System Architecture"):
     
-    # 语言切换开关 (CSS 已强制其居中)
     lang_mode = st.radio(
         "Language", 
         ["EN", "CN"], 
@@ -594,7 +659,6 @@ with st.expander("Operational Protocol & System Architecture"):
     
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 内容显示逻辑
     if lang_mode == "EN":
         st.markdown("""
         <div class="protocol-container">
@@ -630,7 +694,6 @@ with st.expander("Operational Protocol & System Architecture"):
         </div>
         """, unsafe_allow_html=True)
 
-    # 底部版权 (Credits)
     st.markdown("""
     <div class="credits-section">
         SYSTEM ARCHITECTURE POWERED BY<br>
@@ -639,16 +702,3 @@ with st.expander("Operational Protocol & System Architecture"):
         Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
