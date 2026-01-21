@@ -1,4 +1,4 @@
-reflex
+reflex==0.6.4
 google-generativeai
 exa-py
 requests
