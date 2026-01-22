@@ -10,7 +10,6 @@ from exa_py import Exa
 # Reflex 自动从 .env 加载环境变量
 EXA_API_KEY = os.getenv("EXA_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY")
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -26,15 +25,16 @@ class State(rx.State):
     market_data: dict = {}
     top_markets: list[dict] = []
     
-    # 新闻滚动条
-    ticker_text: str = "Loading market intelligence..."
+    # 新闻滚动条 (已移除 CryptoPanic，改为静态显示)
+    ticker_text: str = "Market Intelligence System Online /// Welcome to Be Holmes ///"
 
     # --- 逻辑函数 (Event Handlers) ---
     
     def on_load(self):
         """页面加载时自动运行"""
+        print("🚀 系统启动：正在获取 Top 10 市场数据...")
         self.fetch_top_10_markets()
-        self.fetch_ticker_news()
+        # self.fetch_ticker_news()  <-- 已删除新闻获取调用
 
     async def run_analysis(self):
         """点击 Decode Alpha 按钮时触发"""
@@ -47,6 +47,7 @@ class State(rx.State):
         yield # 更新UI显示加载状态
 
         # 1. 搜索
+        print(f"🔍 开始搜索 Exa: {self.user_news}")
         matches, query = self._search_with_exa(self.user_news)
         
         # 2. 存储最相关的一个市场用于展示
@@ -54,9 +55,11 @@ class State(rx.State):
             self.market_data = matches[0]
         
         # 3. AI 分析
+        print("🧠 开始 AI 分析...")
         self.analysis_result = self._consult_holmes(self.user_news, matches)
         
         self.is_loading = False
+        print("✅ 分析完成")
 
     # --- 内部辅助函数 (原样保留逻辑) ---
 
@@ -177,22 +180,12 @@ class State(rx.State):
                         })
                     except: continue
             self.top_markets = markets
-        except: pass
+            print("✅ Top 10 市场数据加载成功")
+        except: 
+            print("❌ Top 10 市场加载失败")
+            pass
 
-    def fetch_ticker_news(self):
-        if not CRYPTOPANIC_API_KEY: return
-        try:
-            key = CRYPTOPANIC_API_KEY.strip().replace('"', '')
-            url = f"https://cryptopanic.com/api/developer/v2/posts/?auth_token={key}&public=true&filter=rising"
-            resp = requests.get(url, timeout=10)
-            data = resp.json()
-            items = []
-            if "results" in data:
-                for item in data["results"][:10]:
-                    code = f"[{item['currencies'][0]['code']}]" if item.get("currencies") else "⚡"
-                    items.append(f"{code} {item['title']}")
-            self.ticker_text = "      ///      ".join(items)
-        except: self.ticker_text = "News feed unavailable."
+    # ❌ [已删除] fetch_ticker_news 函数及其 CryptoPanic 依赖
 
 
 # ================= 🎨 2. UI COMPONENTS =================
@@ -350,8 +343,6 @@ def ticker_bar():
 
 # ================= 🚀 MAIN PAGE LAYOUT (FIXED) =================
 
-# ================= 🚀 MAIN PAGE LAYOUT (FIXED) =================
-
 def index():
     return rx.box(
         # 1. 第一个直接子元素：遮罩层
@@ -385,6 +376,7 @@ def index():
         bg_attachment="fixed",
         min_height="100vh"
     )
+
 # ================= 🎨 CSS STYLES (Styles.css injection) =================
 # Reflex 允许直接注入 CSS
 style = """
