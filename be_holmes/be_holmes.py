@@ -7,61 +7,59 @@ import os
 from exa_py import Exa
 
 # ================= 🔐 0. KEY CONFIG =================
-# Reflex 自动从 .env 加载环境变量
 EXA_API_KEY = os.getenv("EXA_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+    except Exception as e:
+        print(f"⚠️ Google AI Config Warning: {e}")
 
-# ================= 🧠 1. STATE MANAGEMENT (后端逻辑) =================
+# ================= 🧠 1. STATE MANAGEMENT =================
 class State(rx.State):
-    """应用的状态和逻辑都在这里"""
     user_news: str = ""
     analysis_result: str = ""
     is_loading: bool = False
     
-    # 市场数据
     market_data: dict = {}
     top_markets: list[dict] = []
     
-    # 新闻滚动条 (已移除 CryptoPanic，改为静态显示)
     ticker_text: str = "Market Intelligence System Online /// Welcome to Be Holmes ///"
 
-    # --- 逻辑函数 (Event Handlers) ---
-    
+    # --- 核心修复：伪装成浏览器的请求头 ---
+    _headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://polymarket.com/"
+    }
+
     def on_load(self):
-        """页面加载时自动运行"""
         print("🚀 系统启动：正在获取 Top 10 市场数据...")
         self.fetch_top_10_markets()
-        # self.fetch_ticker_news()  <-- 已删除新闻获取调用
 
     async def run_analysis(self):
-        """点击 Decode Alpha 按钮时触发"""
         if not self.user_news:
             return
         
         self.is_loading = True
         self.analysis_result = ""
         self.market_data = {}
-        yield # 更新UI显示加载状态
+        yield 
 
-        # 1. 搜索
         print(f"🔍 开始搜索 Exa: {self.user_news}")
         matches, query = self._search_with_exa(self.user_news)
         
-        # 2. 存储最相关的一个市场用于展示
         if matches:
             self.market_data = matches[0]
         
-        # 3. AI 分析
         print("🧠 开始 AI 分析...")
         self.analysis_result = self._consult_holmes(self.user_news, matches)
         
         self.is_loading = False
         print("✅ 分析完成")
 
-    # --- 内部辅助函数 (原样保留逻辑) ---
+    # --- 内部函数 ---
 
     def _generate_english_keywords(self, text):
         try:
@@ -88,6 +86,7 @@ class State(rx.State):
                     if match:
                         slug = match.group(1)
                         if slug not in seen_ids:
+                            # 传递请求头
                             data = self._fetch_poly_details(slug)
                             if data:
                                 markets_found.extend(data)
@@ -98,17 +97,19 @@ class State(rx.State):
             return [], query
 
     def _fetch_poly_details(self, slug):
-        # ... (保留原有的 api 获取逻辑，稍微简化) ...
         try:
             url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-            resp = requests.get(url, timeout=3).json()
+            # ✅ 修复点：加入 headers
+            resp = requests.get(url, headers=self._headers, timeout=5).json()
             valid = []
             if isinstance(resp, list) and resp:
                 for m in resp[0].get('markets', [])[:2]:
                     p = self._normalize_data(m)
                     if p: valid.append(p)
             return valid
-        except: return []
+        except Exception as e: 
+            print(f"Details Fetch Error: {e}")
+            return []
 
     def _normalize_data(self, m):
         try:
@@ -132,7 +133,6 @@ class State(rx.State):
         if not GOOGLE_API_KEY: return "AI Key Missing."
         try:
             model = genai.GenerativeModel('gemini-2.5-flash')
-            # 简单判断语言
             lang_instruction = "Respond in CHINESE" if any('\u4e00' <= char <= '\u9fff' for char in user_input) else "Respond in ENGLISH"
             
             market_context = f"Target: {market_data[0]['title']} | Odds: {market_data[0]['odds']}" if market_data else "No specific market."
@@ -150,17 +150,18 @@ class State(rx.State):
         except Exception as e: return f"AI Error: {e}"
 
     def fetch_top_10_markets(self):
-        # ... (保留原有的 Top 10 获取逻辑) ...
         try:
             url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
-            resp = requests.get(url, timeout=5).json()
+            # ✅ 修复点：加入 headers 和 打印日志
+            print("⚡ 正在请求 Polymarket API...")
+            resp = requests.get(url, headers=self._headers, timeout=10).json()
+            
             markets = []
             if isinstance(resp, list):
                 for event in resp:
                     try:
                         markets_raw = event.get('markets', [])
                         if not markets_raw: continue
-                        # 简化处理逻辑适配 Reflex
                         m = markets_raw[0] 
                         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                         prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
@@ -180,13 +181,10 @@ class State(rx.State):
                         })
                     except: continue
             self.top_markets = markets
-            print("✅ Top 10 市场数据加载成功")
-        except: 
-            print("❌ Top 10 市场加载失败")
+            print(f"✅ 成功加载 {len(markets)} 个市场")
+        except Exception as e: 
+            print(f"❌ Top 10 加载失败: {e}")
             pass
-
-    # ❌ [已删除] fetch_ticker_news 函数及其 CryptoPanic 依赖
-
 
 # ================= 🎨 2. UI COMPONENTS =================
 
@@ -231,7 +229,6 @@ def search_section():
     )
 
 def result_card():
-    """显示搜索到的市场卡片"""
     return rx.cond(
         State.market_data,
         rx.box(
@@ -264,7 +261,6 @@ def result_card():
     )
 
 def analysis_report():
-    """显示 Gemini 分析报告"""
     return rx.cond(
         State.analysis_result,
         rx.box(
@@ -280,7 +276,6 @@ def analysis_report():
     )
 
 def market_grid():
-    """底部 Top 10 市场网格"""
     return rx.vstack(
         rx.text("TRENDING ON POLYMARKET (Top 12)", color="#9ca3af", font_size="0.9rem", border_left="3px solid #dc2626", padding_left="10px"),
         rx.grid(
@@ -322,7 +317,6 @@ def market_grid():
     )
 
 def ticker_bar():
-    """底部新闻滚动条 (CSS Animation)"""
     return rx.box(
         rx.box(
             rx.text(State.ticker_text, class_name="ticker-text"),
@@ -341,11 +335,8 @@ def ticker_bar():
         white_space="nowrap"
     )
 
-# ================= 🚀 MAIN PAGE LAYOUT (FIXED) =================
-
 def index():
     return rx.box(
-        # 1. 第一个直接子元素：遮罩层
         rx.box(
             rx.vstack(
                 hero_section(),
@@ -353,23 +344,17 @@ def index():
                 result_card(),
                 analysis_report(),
                 market_grid(),
-                # 底部留白给 Ticker
                 rx.box(height="100px"),
-                
                 align="center",
                 width="100%",
                 padding_bottom="50px"
             ),
-            bg="rgba(0, 0, 0, 0.8)", # 黑色半透明遮罩
+            bg="rgba(0, 0, 0, 0.8)", 
             min_height="100vh",
             width="100%",
             padding_top="20px"
         ),
-        
-        # 2. 第二个直接子元素：底部滚动条
         ticker_bar(),
-
-        # 3. 这里的参数是 rx.box 自己的样式 (Props)
         bg_image="url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg')",
         bg_size="cover",
         bg_position="center",
@@ -377,24 +362,11 @@ def index():
         min_height="100vh"
     )
 
-# ================= 🎨 CSS STYLES (Styles.css injection) =================
-# Reflex 允许直接注入 CSS
 style = """
-.ticker-wrap {
-    width: 100%;
-    overflow: hidden;
-}
-.ticker-text {
-    display: inline-block;
-    white-space: nowrap;
-    animation: ticker 120s linear infinite;
-    padding-left: 100%; 
-}
-@keyframes ticker {
-    0% { transform: translate3d(0, 0, 0); }
-    100% { transform: translate3d(-100%, 0, 0); }
-}
+.ticker-wrap { width: 100%; overflow: hidden; }
+.ticker-text { display: inline-block; white-space: nowrap; animation: ticker 120s linear infinite; padding-left: 100%; }
+@keyframes ticker { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(-100%, 0, 0); } }
 """
 
-app = rx.App(style={}) # 全局样式可以在这里加
-app.add_page(index, on_load=State.on_load) # 加载时触发数据获取
+app = rx.App(style={})
+app.add_page(index, on_load=State.on_load)
