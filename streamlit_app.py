@@ -243,7 +243,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE (Exa Powered) =================
+# ================= 🧠 3. LOGIC CORE (恢复稳定版逻辑 + 适度扩容) =================
 
 def detect_language(text):
     for char in text:
@@ -264,17 +264,17 @@ def search_with_exa(query):
     markets_found, seen_ids = [], set()
     try:
         exa = Exa(EXA_API_KEY)
-        # 🔥 关键修改：大幅增加广度，并开启 AutoPrompt
-        # num_results=25 足够覆盖 Polymarket 的相关问题
+        # 🟢 修正点：
+        # 1. 恢复 "prediction market about..." 前缀，这是语义锚点。
+        # 2. 将 num_results 提高到 15 (之前是4)，增加抓取 DeepSeek 等尾部内容的概率。
+        # 3. 去掉 use_autoprompt=True，防止联想跑偏。
         search_response = exa.search(
-            f"{search_query}", # 直接给关键词，让 AutoPrompt 补全
-            use_autoprompt=True, # 让 Exa 自动理解“这是一个关于xx的预测市场”
-            num_results=25, # 🔥 扩大视野：从 3 改为 25
-            type="neural",
+            f"prediction market about {search_query}",
+            num_results=15, 
+            type="neural", 
             include_domains=["polymarket.com"]
         )
         
-        # 遍历所有 25 个结果，直到找到有效的数据
         for result in search_response.results:
             match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
             if match:
@@ -285,10 +285,9 @@ def search_with_exa(query):
                     if market_data:
                         markets_found.extend(market_data)
                         seen_ids.add(slug)
-                        # 为了性能，如果已经找到 3 个极其相关的，就足够了，不必把 25 个全解析一遍
-                        if len(markets_found) >= 3: 
-                            break 
-                            
+                        # 找到 5 个有效结果就停止，防止 API 请求过多导致卡顿
+                        if len(markets_found) >= 5: break
+                        
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
 
@@ -321,7 +320,7 @@ def fetch_top_10_markets():
                     if isinstance(prices, str): prices = json.loads(prices)
                     if not outcomes or not prices or len(prices) != len(outcomes): continue
 
-                    # 🌟 核心修复逻辑 (保留你要求的逻辑)
+                    # 🌟 修复：智能识别 Yes 价格
                     yes_price = 0
                     no_price = 0
                     
@@ -362,7 +361,6 @@ def fetch_poly_details(slug):
         return valid_markets
     except: pass
     try:
-        # 兼容 market slug 的情况
         url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
         resp = requests.get(url, timeout=3).json()
         if isinstance(resp, list):
@@ -433,8 +431,8 @@ def stream_chat_response(messages, market_data=None):
         Volume: ${market_data['volume']:,.0f}
         """
     else:
-        # 即使没找到市场，也要告诉 AI 继续聊
-        market_context = "[SYSTEM NOTE: No specific betting market found on Polymarket matching this query. Proceed to analyze the topic based on your general knowledge.]"
+        # 如果没搜到，也强行让 AI 回答，不要闭嘴
+        market_context = "[SYSTEM NOTE: No specific betting market found directly. Use your general knowledge to analyze the topic.]"
     
     system_prompt = f"""
     You are **Be Holmes**, a rational Macro Hedge Fund Manager.
@@ -485,7 +483,6 @@ if ignite_btn:
         with st.spinner("Neural Searching..."):
             matches, keyword = search_with_exa(user_news)
         
-        # 只要有回复，无论找没找到市场，都继续
         if matches:
             st.session_state.current_market = matches[0]
         else:
@@ -526,7 +523,6 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
     else:
-        # 没搜到时，显示这个提示，而不是报错
         st.markdown("""
         <div style="text-align:center; padding:10px; color:#9ca3af; font-size:0.9rem; background:rgba(255,255,255,0.05); border-radius:8px; margin-bottom:20px;">
             ⚠️ No specific market found. Analyzing based on general intelligence.
