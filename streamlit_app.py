@@ -15,7 +15,8 @@ except FileNotFoundError:
     GOOGLE_API_KEY = None
     KEYS_LOADED = False
 except KeyError:
-    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
+
+    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
     KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
 
@@ -640,3 +641,4 @@ with st.expander("Operational Protocol & System Architecture"):
         Data Stream: Polymarket Gamma API
     </div>
     """, unsafe_allow_html=True)
+
