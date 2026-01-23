@@ -47,11 +47,11 @@ if "last_search_query" not in st.session_state:
 if "chat_history_context" not in st.session_state:
     st.session_state.chat_history_context = []
 if "search_results" not in st.session_state:
-    st.session_state.search_results = []  # 存储搜索结果列表
+    st.session_state.search_results = []  
 if "show_market_selection" not in st.session_state:
-    st.session_state.show_market_selection = False  # 是否显示市场选择界面
+    st.session_state.show_market_selection = False  
 if "selected_market_index" not in st.session_state:
-    st.session_state.selected_market_index = -1  # 用户选择的市场索引
+    st.session_state.selected_market_index = -1  
 
 # ================= 🎨 2. UI THEME (保持原版不动) =================
 st.markdown("""
@@ -275,121 +275,236 @@ st.markdown("""
         max-width: 900px;
         backdrop-filter: blur(8px);
     }
+    
+    /* Relevance Indicator */
+    .relevance-badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        margin-left: 10px;
+    }
+    .relevance-high {
+        background: rgba(6, 78, 59, 0.4);
+        color: #4ade80;
+        border: 1px solid rgba(6, 78, 59, 0.6);
+    }
+    .relevance-medium {
+        background: rgba(146, 64, 14, 0.4);
+        color: #fdba74;
+        border: 1px solid rgba(146, 64, 14, 0.6);
+    }
+    .relevance-low {
+        background: rgba(127, 29, 29, 0.4);
+        color: #f87171;
+        border: 1px solid rgba(127, 29, 29, 0.6);
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 3. LOGIC CORE =================
 
-def generate_english_keywords(user_text):
-    """更智能的关键词提取"""
+def extract_entities_and_keywords(user_text):
+    """使用Gemini提取新闻中的核心实体和关键词，优先排序"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""
-        Extract concise English search keywords for searching prediction markets on Polymarket.
+        分析以下新闻，提取用于搜索预测市场的关键词。请按重要性排序：
         
-        User Query: "{user_text}"
+        新闻原文："{user_text}"
         
-        Output format: Just the keywords, separated by spaces.
-        Keep it short and focused on the main entities and events.
+        要求：
+        1. 识别核心主体（公司、人物、产品）：如Tesla, Elon Musk, FSD等
+        2. 识别核心事件/主题：如regulatory approval, launch, earnings等
+        3. 识别次要信息：如地点、时间等
+        4. 按以下格式输出：
+        
+        核心实体: [实体1], [实体2], [实体3]
+        事件关键词: [关键词1], [关键词2], [关键词3]
+        搜索优先级: 
+        1. [最高优先级搜索词]
+        2. [中优先级搜索词]
+        3. [低优先级搜索词]
+        
+        示例输入："苹果将在2024年发布新款iPhone"
+        输出：
+        核心实体: Apple, iPhone
+        事件关键词: launch, release, new product
+        搜索优先级: 
+        1. Apple iPhone launch prediction market
+        2. Apple new product release market
+        3. Apple 2024 product prediction
         """
+        
         resp = model.generate_content(prompt)
-        keywords = resp.text.strip()
+        text = resp.text.strip()
         
-        # 如果提取失败，使用简单的规则
-        if not keywords or len(keywords.split()) > 10:
-            # 移除常见问题词，保留核心内容
-            stop_words = ["what", "how", "when", "where", "why", "who", "is", "are", "will", "the", "this", "that"]
-            words = user_text.lower().split()
-            keywords = " ".join([w for w in words if w not in stop_words][:5])
+        # 解析响应
+        entities = []
+        events = []
+        search_queries = []
         
-        return keywords
+        lines = text.split('\n')
+        for line in lines:
+            if line.startswith('核心实体:'):
+                entities = [e.strip() for e in line.replace('核心实体:', '').split(',')]
+            elif line.startswith('事件关键词:'):
+                events = [e.strip() for e in line.replace('事件关键词:', '').split(',')]
+            elif line.startswith('1.'):
+                search_queries.append(line.split('. ', 1)[1].strip())
+            elif line.startswith('2.'):
+                search_queries.append(line.split('. ', 1)[1].strip())
+            elif line.startswith('3.'):
+                search_queries.append(line.split('. ', 1)[1].strip())
+        
+        # 如果没有提取到搜索查询，使用备用策略
+        if not search_queries:
+            # 组合实体和事件
+            if entities and events:
+                search_queries = [
+                    f"{entities[0]} {events[0]} prediction market",
+                    f"{' '.join(entities[:2])} market",
+                    f"{' '.join(entities)} Polymarket"
+                ]
+            else:
+                # 最后备选：简单清理文本
+                cleaned = re.sub(r'[^a-zA-Z0-9\s]', ' ', user_text)
+                words = cleaned.lower().split()
+                stop_words = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were", "be", "been", "being"]
+                keywords = [w for w in words if w not in stop_words][:6]
+                search_queries = [' '.join(keywords)]
+        
+        return {
+            'entities': entities,
+            'events': events,
+            'search_queries': search_queries
+        }
+        
     except Exception as e:
-        print(f"Keyword generation error: {e}")
-        # 回退：只保留字母数字和空格
+        print(f"Entity extraction error: {e}")
+        # 回退策略
         cleaned = re.sub(r'[^a-zA-Z0-9\s]', ' ', user_text)
-        return cleaned[:50]
+        return {
+            'entities': [],
+            'events': [],
+            'search_queries': [cleaned[:100]]
+        }
 
-def search_with_exa(query, use_enhanced=True):
-    """搜索相关市场，返回所有匹配结果"""
+def calculate_relevance_score(market_title, entities, events):
+    """计算市场标题与新闻的相关性分数"""
+    title_lower = market_title.lower()
+    
+    # 初始化分数
+    score = 0
+    
+    # 检查核心实体
+    for entity in entities:
+        entity_lower = entity.lower()
+        if entity_lower in title_lower:
+            score += 10  # 核心实体匹配高分
+            # 如果实体在开头，额外加分
+            if title_lower.startswith(entity_lower):
+                score += 5
+    
+    # 检查事件关键词
+    for event in events:
+        event_lower = event.lower()
+        if event_lower in title_lower:
+            score += 5  # 事件匹配中分
+    
+    # 特殊关键词加分
+    special_keywords = ['tesla', 'elon', 'musk', 'fsd', 'full self-driving', 'autonomous']
+    for keyword in special_keywords:
+        if keyword in title_lower:
+            score += 3
+    
+    # 减分项：过度强调中国（如果核心实体不是中国公司）
+    if 'china' in title_lower or 'chinese' in title_lower:
+        if not any(e.lower() in ['alibaba', 'tencent', 'baidu', 'xiaomi'] for e in entities):
+            score -= 2  # 如果不是中国公司，中国相关减分
+    
+    return score
+
+def search_with_exa_optimized(user_text):
+    """优化的语义搜索，聚焦核心实体"""
     if not EXA_AVAILABLE or not EXA_API_KEY: 
-        return [], query
+        return [], []
     
-    search_query = generate_english_keywords(query)
+    # 提取实体和搜索查询
+    extraction_result = extract_entities_and_keywords(user_text)
+    entities = extraction_result['entities']
+    events = extraction_result['events']
+    search_queries = extraction_result['search_queries']
     
-    markets_found, seen_ids = [], set()
+    print(f"提取的实体: {entities}")
+    print(f"提取的事件: {events}")
+    print(f"搜索查询: {search_queries}")
+    
+    markets_found = []
+    seen_titles = set()
+    
     try:
         exa = Exa(EXA_API_KEY)
         
-        # 使用多种搜索策略获取更多结果
-        search_strategies = [
-            f"prediction market about {search_query}",
-            f"Polymarket {search_query} odds",
-            f"{search_query} prediction market",
-            f"market predictions {search_query}"
-        ]
-        
-        for strategy in search_strategies:
-            if len(markets_found) >= 10:  # 最多收集10个结果
+        # 按优先级顺序尝试搜索
+        for query in search_queries:
+            if len(markets_found) >= 15:  # 最多收集15个结果
                 break
                 
             try:
-                search_response = exa.search(
-                    strategy,
-                    num_results=15, 
-                    type="neural", 
-                    include_domains=["polymarket.com"]
-                )
+                # 尝试不同的搜索格式
+                search_formats = [
+                    f"{query} prediction market Polymarket",
+                    f"Polymarket market {query}",
+                    f"{query} market odds",
+                    f"prediction market {query}"
+                ]
                 
-                for result in search_response.results:
-                    match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
-                    if match:
-                        slug = match.group(1)
-                        # 过滤无关页面
-                        if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity'] and slug not in seen_ids:
-                            market_data = fetch_poly_details(slug)
-                            if market_data:
-                                for market in market_data:
-                                    # 计算相关性得分（简单版：基于标题长度和是否有价格）
-                                    relevance_score = 0
-                                    title = market.get('title', '').lower()
-                                    query_terms = query.lower().split()
-                                    
-                                    # 标题包含查询词的越多，相关性越高
-                                    for term in query_terms:
-                                        if term in title:
-                                            relevance_score += 1
-                                    
-                                    # 确保有价格信息
-                                    if market.get('odds'):
-                                        relevance_score += 2
-                                    
-                                    # 添加相关性得分到市场数据
-                                    market['relevance_score'] = relevance_score
-                                    markets_found.append(market)
-                                    
-                                seen_ids.add(slug)
-                                
+                for search_str in search_formats:
+                    print(f"尝试搜索: {search_str}")
+                    
+                    search_response = exa.search(
+                        search_str,
+                        num_results=8, 
+                        type="neural",
+                        include_domains=["polymarket.com"]
+                    )
+                    
+                    for result in search_response.results:
+                        match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
+                        if match:
+                            slug = match.group(1)
+                            # 过滤无关页面
+                            if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity']:
+                                market_data = fetch_poly_details(slug)
+                                if market_data:
+                                    for market in market_data:
+                                        title = market.get('title', '')
+                                        
+                                        # 去重
+                                        if title and title not in seen_titles:
+                                            # 计算相关性分数
+                                            relevance = calculate_relevance_score(title, entities, events)
+                                            market['relevance_score'] = relevance
+                                            market['slug'] = slug
+                                            markets_found.append(market)
+                                            seen_titles.add(title)
+                                            
             except Exception as e:
-                print(f"Search strategy error: {e}")
+                print(f"搜索查询 '{query}' 错误: {e}")
                 continue
                         
     except Exception as e: 
-        print(f"Search error: {e}")
+        print(f"搜索主错误: {e}")
     
-    # 按相关性排序并去重（基于标题）
-    unique_markets = []
-    seen_titles = set()
+    # 按相关性排序
+    markets_found.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
     
-    for market in sorted(markets_found, key=lambda x: x.get('relevance_score', 0), reverse=True):
-        title = market.get('title', '').strip()
-        if title and title not in seen_titles and len(title) > 10:  # 确保标题合理
-            unique_markets.append(market)
-            seen_titles.add(title)
-            
-            if len(unique_markets) >= 8:  # 最多显示8个
-                break
+    # 过滤掉相关性太低的结果
+    filtered_markets = [m for m in markets_found if m.get('relevance_score', 0) > 5]
     
-    return unique_markets, search_query
+    return filtered_markets[:10], search_queries[0] if search_queries else ""
 
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
@@ -503,7 +618,7 @@ def normalize_data(m):
         }
     except: return None
 
-# ================= 🧠 3.1 AGENT BRAIN (Smart Router + Safety) =================
+# ================= 🧠 3.1 AGENT BRAIN =================
 
 safety_config = {
     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -517,7 +632,6 @@ def check_search_intent(user_text, current_market=None):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         
-        # 构建上下文信息
         context = {
             'current_market': current_market['title'] if current_market else None,
             'last_search': st.session_state.last_search_query,
@@ -534,35 +648,17 @@ def check_search_intent(user_text, current_market=None):
         
         USER INPUT: "{user_text}"
         
-        CONSIDER THESE EXAMPLES:
-        - "Search for Bitcoin price prediction" → YES (explicit search)
-        - "What about Tesla stock?" → YES (new topic)
-        - "How does this affect the odds?" → NO (follow-up about current topic)
-        - "Explain more about this market" → NO (follow-up)
-        - "Find markets about politics" → YES (new search)
-        - "Who is betting on this?" → NO (follow-up)
-        - "What are the risks?" → NO (follow-up)
-        - "Show me SpaceX markets" → YES (new topic)
-        
-        RULES:
-        1. If user explicitly says "search", "find", "look for", "show me" → YES
-        2. If user mentions a completely different entity/topic → YES
-        3. If user asks about details/analysis/opinion of current topic → NO
-        4. If query is very short (1-3 words) and not obviously new → NO
-        
         Output only "YES" or "NO".
         """
         
         resp = model.generate_content(prompt, safety_settings=safety_config)
         result = resp.text.strip().upper()
         
-        # 安全回退
         if "YES" in result:
             return True
         elif "NO" in result:
             return False
         else:
-            # 使用简单规则作为回退
             search_triggers = ["search", "find", "look for", "show me", "new", "different"]
             if any(trigger in user_text.lower() for trigger in search_triggers):
                 return True
@@ -580,7 +676,6 @@ def stream_chat_response(messages, market_data=None, user_query=""):
     
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # 构建对话历史上下文
     recent_history = "\n".join([
         f"{'User' if msg['role']=='user' else 'Assistant'}: {msg['content'][:100]}..."
         for msg in messages[-3:]
@@ -593,10 +688,9 @@ def stream_chat_response(messages, market_data=None, user_query=""):
         - Event/Question: "{market_data['title']}"
         - Current Odds: {market_data['odds']}
         - Trading Volume: ${market_data['volume']:,.0f}
-        - Market URL: https://polymarket.com/event/{market_data['slug']}
+        - Relevance Score: {market_data.get('relevance_score', 'N/A')}
         """
     
-    # 获取用户原始查询（如果有）
     user_intel = user_query if user_query else "the provided intelligence"
     
     system_prompt = f"""
@@ -650,11 +744,9 @@ def analyze_selected_market(market_index, user_query):
         st.session_state.current_market = selected_market
         st.session_state.selected_market_index = market_index
         
-        # 重置消息历史，开始新的分析对话
         st.session_state.messages = []
         st.session_state.messages.append({"role": "user", "content": f"Analyze this intel in relation to the selected market: {user_query}"})
         
-        # 生成分析
         with st.spinner("🧠 Decoding Alpha..."):
             response = stream_chat_response(
                 st.session_state.messages, 
@@ -663,7 +755,6 @@ def analyze_selected_market(market_index, user_query):
             )
             st.session_state.messages.append({"role": "assistant", "content": response})
         
-        # 关闭市场选择界面
         st.session_state.show_market_selection = False
         return True
     return False
@@ -677,12 +768,12 @@ st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets wi
 # 4.2 Search Section
 _, mid, _ = st.columns([1, 6, 1])
 with mid:
-    user_news = st.text_area("Input", height=70, placeholder="Enter news, event, or intelligence to analyze...", label_visibility="collapsed", key="main_search_input")
+    user_news = st.text_area("Input", height=100, placeholder="Enter news, event, or intelligence to analyze...", label_visibility="collapsed", key="main_search_input")
 
 # 4.3 Button Section
 _, btn_col, _ = st.columns([1, 2, 1])
 with btn_col:
-    ignite_btn = st.button("Search Markets", use_container_width=True)
+    ignite_btn = st.button("🔍 Search Markets", use_container_width=True)
 
 # 4.4 触发搜索逻辑
 if ignite_btn:
@@ -691,20 +782,17 @@ if ignite_btn:
     elif not user_news:
         st.warning("Please enter intelligence to analyze.")
     else:
-        # 重置状态
         st.session_state.messages = []
         st.session_state.current_market = None
         st.session_state.selected_market_index = -1
         
-        with st.spinner("🔍 Neural Searching Polymarket..."):
-            matches, keyword = search_with_exa(user_news)
+        with st.spinner("🔍 Analyzing news and searching Polymarket..."):
+            matches, keyword = search_with_exa_optimized(user_news)
         
-        # 保存搜索查询和结果
         st.session_state.last_search_query = keyword
         st.session_state.search_results = matches
         
         if matches:
-            # 显示市场选择界面
             st.session_state.show_market_selection = True
             st.rerun()
         else:
@@ -716,20 +804,44 @@ if ignite_btn:
 if st.session_state.show_market_selection and st.session_state.search_results:
     st.markdown("---")
     
+    # 显示搜索摘要
+    with st.expander("🔎 Search Summary", expanded=True):
+        st.info(f"""
+        **Search Query:** {st.session_state.last_search_query}
+        
+        **Found Markets:** {len(st.session_state.search_results)} relevant prediction markets
+        
+        **Relevance Scoring:**
+        - 🟢 High (>15): Directly related to core entities
+        - 🟡 Medium (10-15): Partially related
+        - 🔴 Low (5-10): Weakly related
+        """)
+    
     st.markdown(f"""
     <div class="selection-container">
-        <h3 style="color: #e5e7eb; margin-bottom: 5px;">📊 Found {len(st.session_state.search_results)} Relevant Markets</h3>
-        <p style="color: #9ca3af; margin-bottom: 25px;">Select a market to analyze with your intelligence:</p>
+        <h3 style="color: #e5e7eb; margin-bottom: 5px;">📊 Select a Market for Analysis</h3>
+        <p style="color: #9ca3af; margin-bottom: 25px;">Markets sorted by relevance to your news:</p>
     </div>
     """, unsafe_allow_html=True)
     
     # 显示市场列表
     for idx, market in enumerate(st.session_state.search_results):
-        # 创建列：左侧市场信息，右侧选择按钮
+        relevance_score = market.get('relevance_score', 0)
+        
+        # 确定相关性标签
+        if relevance_score > 15:
+            relevance_class = "relevance-high"
+            relevance_label = "🟢 High"
+        elif relevance_score > 10:
+            relevance_class = "relevance-medium"
+            relevance_label = "🟡 Medium"
+        else:
+            relevance_class = "relevance-low"
+            relevance_label = "🔴 Low"
+        
         col1, col2 = st.columns([4, 1])
         
         with col1:
-            # 市场卡片
             is_selected = (st.session_state.selected_market_index == idx)
             card_class = "market-selection-card selected" if is_selected else "market-selection-card"
             
@@ -737,18 +849,19 @@ if st.session_state.show_market_selection and st.session_state.search_results:
             <div class="{card_class}">
                 <div style="font-size: 1.1rem; color: #e5e7eb; font-weight: 500; margin-bottom: 8px;">
                     {market['title']}
+                    <span class="relevance-badge {relevance_class}">{relevance_label}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <span style="color: #4ade80; font-weight: 600;">{market['odds']}</span>
                         <span style="color: #9ca3af; margin-left: 15px;">Volume: ${market['volume']:,.0f}</span>
+                        <span style="color: #9ca3af; margin-left: 15px;">Score: {relevance_score}</span>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
-            # 选择按钮
             if st.button(f"Select", key=f"select_{idx}", use_container_width=True):
                 analyze_selected_market(idx, user_news)
                 st.rerun()
@@ -763,16 +876,24 @@ if st.session_state.show_market_selection and st.session_state.search_results:
 
 # ================= 🗣️ 6. CHAT INTERFACE =================
 
-# 只有在用户选择了市场后才显示聊天界面
 if not st.session_state.show_market_selection and st.session_state.messages:
     st.markdown("---")
     
-    # 显示当前选择的市场卡片
     if st.session_state.current_market:
         m = st.session_state.current_market
+        relevance_score = m.get('relevance_score', 0)
+        
+        # 相关性指示器
+        if relevance_score > 15:
+            relevance_indicator = "🟢 Highly Relevant"
+        elif relevance_score > 10:
+            relevance_indicator = "🟡 Moderately Relevant"
+        else:
+            relevance_indicator = "🔴 Weakly Relevant"
+        
         st.markdown(f"""
         <div class="market-card">
-            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">SELECTED MARKET</div>
+            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">SELECTED MARKET • {relevance_indicator}</div>
             <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px; font-weight:bold;">{m['title']}</div>
             <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                 <div>
@@ -790,7 +911,6 @@ if not st.session_state.show_market_selection and st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
     
-    # 显示消息历史
     for i, msg in enumerate(st.session_state.messages):
         if i == 0: continue 
         
@@ -800,18 +920,14 @@ if not st.session_state.show_market_selection and st.session_state.messages:
             else:
                 st.write(msg["content"])
 
-    # 聊天输入
     if prompt := st.chat_input("Ask a follow-up question or search for a new topic..."):
-        # 添加用户消息
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # 判断是否需要进行新搜索
         is_search = check_search_intent(prompt, st.session_state.current_market)
         
         if is_search:
-            # 新搜索逻辑 - 直接回到搜索流程
             st.session_state.show_market_selection = False
             st.session_state.current_market = None
             st.session_state.messages = []
@@ -820,7 +936,7 @@ if not st.session_state.show_market_selection and st.session_state.messages:
                 st.write(f"🔍 Searching for new markets related to: **{prompt}**")
                 
                 with st.spinner("Scanning Polymarket..."):
-                    matches, keyword = search_with_exa(prompt)
+                    matches, keyword = search_with_exa_optimized(prompt)
                 
                 if matches:
                     st.session_state.search_results = matches
@@ -833,7 +949,6 @@ if not st.session_state.show_market_selection and st.session_state.messages:
             st.rerun()
             
         else:
-            # 追问逻辑 - 基于当前市场继续分析
             with st.chat_message("assistant", avatar="🕵️‍♂️"):
                 with st.spinner("Analyzing follow-up..."):
                     response = stream_chat_response(
@@ -910,20 +1025,20 @@ with st.expander("Operational Protocol & System Architecture"):
     if lang_mode == "EN":
         st.markdown("""
         <div class="protocol-container">
-            <div class="protocol-step"><span class="protocol-title">1. Intelligence Injection (Input)</span>User inputs unstructured natural language data.</div>
-            <div class="protocol-step"><span class="protocol-title">2. Neural Semantic Mapping (Processing)</span>Powered by <b>Exa.ai</b>, converting semantics into vector embeddings.</div>
-            <div class="protocol-step"><span class="protocol-title">3. Bayesian Alpha Decoding (Analysis)</span><b>Google Gemini</b> synthesizes market odds with input intelligence.</div>
+            <div class="protocol-step"><span class="protocol-title">1. Entity Extraction (Intelligence)</span>Gemini extracts core entities (Tesla, Musk, FSD) and ranks by importance.</div>
+            <div class="protocol-step"><span class="protocol-title">2. Semantic Search (Mapping)</span>Exa.ai searches with prioritized queries based on entity relevance.</div>
+            <div class="protocol-step"><span class="protocol-title">3. Relevance Scoring (Filtering)</span>Markets are scored by entity match and sorted for optimal selection.</div>
         </div>""", unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="protocol-container">
-            <div class="protocol-step"><span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>用户输入非结构化数据，系统解析语义核心。</div>
-            <div class="protocol-step"><span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>由 <b>Exa.ai</b> 驱动，精准定位预测市场。</div>
-            <div class="protocol-step"><span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span><b>Google Gemini</b> 计算"预期差"，判断套利空间。</div>
+            <div class="protocol-step"><span class="protocol-title">1. 实体提取 (Entity Extraction)</span>Gemini提取核心实体（特斯拉、马斯克、FSD）并按重要性排序。</div>
+            <div class="protocol-step"><span class="protocol-title">2. 语义搜索 (Semantic Search)</span>Exa.ai根据实体相关性使用优先级查询进行搜索。</div>
+            <div class="protocol-step"><span class="protocol-title">3. 相关性评分 (Relevance Scoring)</span>根据实体匹配度对市场进行评分和排序。</div>
         </div>""", unsafe_allow_html=True)
     st.markdown("""
     <div class="credits-section">
-        SYSTEM ARCHITECTURE POWERED BY<br>
-        <span class="credits-highlight">Exa.ai (Neural Search)</span> & <span class="credits-highlight">Google Gemini (Cognitive Core)</span><br><br>
+        ENHANCED SEMANTIC SEARCH POWERED BY<br>
+        <span class="credits-highlight">Gemini Entity Extraction</span> & <span class="credits-highlight">Exa.ai Neural Search</span><br><br>
         Data Stream: Polymarket Gamma API
     </div>""", unsafe_allow_html=True)
