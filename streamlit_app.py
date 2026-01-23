@@ -10,14 +10,10 @@ try:
     EXA_API_KEY = st.secrets["EXA_API_KEY"]
     GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
     KEYS_LOADED = True
-except FileNotFoundError:
+except:
     EXA_API_KEY = None
     GOOGLE_API_KEY = None
     KEYS_LOADED = False
-except KeyError:
-    EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
-    GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
-    KEYS_LOADED = bool(EXA_API_KEY and GOOGLE_API_KEY)
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -48,10 +44,8 @@ if "first_visit" not in st.session_state:
 # ================= 🎨 2. UI THEME =================
 st.markdown("""
 <style>
-    /* Import Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
 
-    /* 1. Global Background */
     .stApp {
         background-image: linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.9)), 
                           url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
@@ -60,13 +54,8 @@ st.markdown("""
         background-attachment: fixed;
         font-family: 'Inter', sans-serif;
     }
-
-    /* Transparent Header */
     header[data-testid="stHeader"] { background-color: transparent !important; }
-    [data-testid="stToolbar"] { visibility: hidden; }
-    [data-testid="stDecoration"] { visibility: hidden; }
-
-    /* Hero Title */
+    
     .hero-title {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
@@ -79,80 +68,18 @@ st.markdown("""
         text-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     
-    .hero-subtitle {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 1.1rem;
-        color: #9ca3af; 
-        text-align: center;
-        margin-bottom: 50px;
-        font-weight: 400;
-    }
-
-    /* 4. Input Field Styling */
-    div[data-testid="stVerticalBlock"] > div {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    .stTextArea { width: 100% !important; max-width: 800px !important; }
-    
-    .stTextArea textarea {
-        background-color: rgba(31, 41, 55, 0.6) !important;
-        color: #ffffff !important;
-        border: 1px solid #374151 !important;
-        border-radius: 16px !important;
-        padding: 15px 20px !important; 
-        font-size: 1rem !important;
-        text-align: left !important;
-        line-height: 1.6 !important;
-        backdrop-filter: blur(10px);
-        transition: all 0.3s ease;
-    }
-    
-    .stTextArea textarea:focus {
-        border-color: rgba(239, 68, 68, 0.8) !important;
-        box-shadow: 0 0 15px rgba(220, 38, 38, 0.3) !important;
-        background-color: rgba(31, 41, 55, 0.9) !important;
-    }
-
-    /* 3. Button Styling */
-    div.stButton > button:first-child {
-        background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
-        background-size: 200% auto !important;
-        color: #ffffff !important;
-        border: 1px solid rgba(239, 68, 68, 0.5) !important;
-        border-radius: 50px !important;
-        padding: 12px 50px !important;
-        font-weight: 600 !important;
-        font-size: 1.1rem !important;
-        margin-top: 10px !important;
-        transition: 0.5s !important;
-        box-shadow: 0 0 20px rgba(0,0,0,0.5) !important;
-    }
-    
-    div.stButton > button:first-child:hover {
-        background-position: right center !important;
-        transform: scale(1.05) !important;
-        box-shadow: 0 0 30px rgba(220, 38, 38, 0.6) !important;
-        border-color: #fca5a5 !important;
-    }
-    
-    div.stButton > button:first-child:active {
-        transform: scale(0.98) !important;
-    }
-
-    /* Result Card */
     .market-card {
-        background: rgba(17, 24, 39, 0.7);
+        background: rgba(17, 24, 39, 0.8);
         border: 1px solid #374151;
         border-radius: 12px;
         padding: 20px;
         margin: 20px auto;
         max-width: 800px;
         backdrop-filter: blur(8px);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
 
-    /* Bottom Grid Styling */
+    /* Top 12 Grid Styles */
     .top10-container {
         width: 100%;
         max-width: 1200px;
@@ -168,16 +95,13 @@ st.markdown("""
         border-left: 3px solid #dc2626;
         padding-left: 10px;
     }
-    
     .top10-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 15px;
     }
-
-    @media (max-width: 1000px) { .top10-grid { grid-template-columns: repeat(2, 1fr); } }
-    @media (max-width: 600px) { .top10-grid { grid-template-columns: 1fr; } }
-
+    @media (max-width: 800px) { .top10-grid { grid-template-columns: 1fr; } }
+    
     .market-item {
         background: rgba(17, 24, 39, 0.6);
         border: 1px solid #374151;
@@ -209,31 +133,24 @@ st.markdown("""
         -webkit-box-orient: vertical;
         overflow: hidden;
     }
-    .m-odds {
-        display: flex;
-        gap: 8px;
-        font-family: 'Inter', monospace;
-        font-size: 0.75rem;
-        margin-top: auto;
-    }
-    .tag-yes {
-        background: rgba(6, 78, 59, 0.4);
-        color: #4ade80;
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-    }
-    .tag-no {
-        background: rgba(127, 29, 29, 0.4);
-        color: #f87171;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-weight: 600;
-    }
+    .m-odds { display: flex; gap: 8px; font-size: 0.75rem; margin-top: auto; }
+    .tag-yes { background: rgba(6, 78, 59, 0.4); color: #4ade80; padding: 2px 8px; border-radius: 4px; font-weight: bold;}
+    .tag-no { background: rgba(127, 29, 29, 0.4); color: #f87171; padding: 2px 8px; border-radius: 4px; font-weight: bold;}
     
-    /* Chat Message Styling */
+    .stTextArea textarea {
+        background-color: rgba(31, 41, 55, 0.6) !important;
+        color: #ffffff !important;
+        border: 1px solid #374151 !important;
+        border-radius: 16px !important;
+        padding: 15px 20px !important; 
+        font-size: 1rem !important;
+    }
+    div.stButton > button:first-child {
+        background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
+        color: white !important;
+        border-radius: 50px !important;
+        border: none !important;
+    }
     .stChatMessage {
         background: rgba(31, 41, 55, 0.4);
         border: 1px solid rgba(255,255,255,0.1);
@@ -243,12 +160,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE (恢复稳定版逻辑 + 适度扩容) =================
-
-def detect_language(text):
-    for char in text:
-        if '\u4e00' <= char <= '\u9fff': return "CHINESE"
-    return "ENGLISH"
+# ================= 🧠 3. LOGIC CORE =================
 
 def generate_english_keywords(user_text):
     try:
@@ -264,13 +176,10 @@ def search_with_exa(query):
     markets_found, seen_ids = [], set()
     try:
         exa = Exa(EXA_API_KEY)
-        # 🟢 修正点：
-        # 1. 恢复 "prediction market about..." 前缀，这是语义锚点。
-        # 2. 将 num_results 提高到 15 (之前是4)，增加抓取 DeepSeek 等尾部内容的概率。
-        # 3. 去掉 use_autoprompt=True，防止联想跑偏。
+        # 🟢 修正：保持稳定版的搜索逻辑，增加结果数到 10 以提高命中率
         search_response = exa.search(
             f"prediction market about {search_query}",
-            num_results=15, 
+            num_results=10, 
             type="neural", 
             include_domains=["polymarket.com"]
         )
@@ -279,14 +188,13 @@ def search_with_exa(query):
             match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
             if match:
                 slug = match.group(1)
-                # 过滤掉无用的个人页等
+                # 过滤无关页面
                 if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity'] and slug not in seen_ids:
                     market_data = fetch_poly_details(slug)
                     if market_data:
                         markets_found.extend(market_data)
                         seen_ids.add(slug)
-                        # 找到 5 个有效结果就停止，防止 API 请求过多导致卡顿
-                        if len(markets_found) >= 5: break
+                        if len(markets_found) >= 3: break # 找到3个最相关的就够了
                         
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
@@ -320,7 +228,7 @@ def fetch_top_10_markets():
                     if isinstance(prices, str): prices = json.loads(prices)
                     if not outcomes or not prices or len(prices) != len(outcomes): continue
 
-                    # 🌟 修复：智能识别 Yes 价格
+                    # 🌟 逻辑修复：Yes/No 智能判断
                     yes_price = 0
                     no_price = 0
                     
@@ -334,7 +242,6 @@ def fetch_top_10_markets():
                             yes_price = int(float(prices[0]) * 100)
                             no_price = 100 - yes_price
                     else:
-                        # 多选项市场，找最大的
                         max_price = max([float(p) for p in prices])
                         yes_price = int(max_price * 100)
                         no_price = 100 - yes_price
@@ -355,7 +262,7 @@ def fetch_poly_details(slug):
         url = f"https://gamma-api.polymarket.com/events?slug={slug}"
         resp = requests.get(url, timeout=3).json()
         if isinstance(resp, list) and resp:
-            for m in resp[0].get('markets', [])[:1]: # 只取最核心的一个
+            for m in resp[0].get('markets', [])[:1]: 
                 p = normalize_data(m)
                 if p: valid_markets.append(p)
         return valid_markets
@@ -384,14 +291,12 @@ def normalize_data(m):
         
         if not outcomes or not prices: return None
 
-        # 智能价格展示
         display_label = ""
         if "Yes" in outcomes:
             idx = outcomes.index("Yes")
             price = float(prices[idx])
             display_label = f"Yes: {price*100:.1f}%"
         else:
-            # 多选市场：找概率最高的
             float_prices = [float(p) for p in prices]
             max_p = max(float_prices)
             max_idx = float_prices.index(max_p)
@@ -431,8 +336,7 @@ def stream_chat_response(messages, market_data=None):
         Volume: ${market_data['volume']:,.0f}
         """
     else:
-        # 如果没搜到，也强行让 AI 回答，不要闭嘴
-        market_context = "[SYSTEM NOTE: No specific betting market found directly. Use your general knowledge to analyze the topic.]"
+        market_context = "[SYSTEM NOTE: No specific betting market found on Polymarket matching this query. Use general knowledge.]"
     
     system_prompt = f"""
     You are **Be Holmes**, a rational Macro Hedge Fund Manager.
@@ -441,7 +345,7 @@ def stream_chat_response(messages, market_data=None):
     
     **INSTRUCTIONS:**
     1. If market data is found, use it to give a verdict (Priced-in vs Opportunity).
-    2. If NO market data is found, analyze the topic broadly using your internal knowledge. Discuss why a market might not exist yet or what the implications are if it did.
+    2. If NO market data is found, analyze the topic broadly using your internal knowledge.
     3. Be cynical, data-driven, and professional.
     4. Automatically detect language: If user asks in Chinese, answer in Chinese.
     """
@@ -450,8 +354,15 @@ def stream_chat_response(messages, market_data=None):
     for msg in messages:
         role = "user" if msg["role"] == "user" else "model"
         history.append({"role": role, "parts": [msg["content"]]})
-        
-    return model.generate_content(history).text
+    
+    # 🔴 关键修复：增加 try-except 捕获 ValueError (Safety Filters)
+    try:
+        response = model.generate_content(history)
+        return response.text
+    except ValueError:
+        return "⚠️ Safety Filter Triggered: I cannot generate a response for this specific query due to content safety policies. Please try asking in a different way."
+    except Exception as e:
+        return f"⚠️ AI Error: {str(e)}"
 
 # ================= 🖥️ 4. MAIN INTERFACE =================
 
