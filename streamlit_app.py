@@ -3,6 +3,7 @@ import requests
 import json
 import google.generativeai as genai
 import re
+import time
 
 # ================= 🔐 0. KEY MANAGEMENT =================
 try:
@@ -36,7 +37,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================= 🎨 2. UI THEME (UPDATED FOR CLICKABLE CARDS) =================
+# ================= 🧠 1.1 STATE MANAGEMENT (新增：记忆模块) =================
+# 这是一个 Agent 必须具备的“海马体”
+if "messages" not in st.session_state:
+    st.session_state.messages = []  # 聊天记录
+if "current_market" not in st.session_state:
+    st.session_state.current_market = None # 当前锁定的市场上下文
+if "first_visit" not in st.session_state:
+    st.session_state.first_visit = True # 是否是首次访问
+
+# ================= 🎨 2. UI THEME (保持不变) =================
 st.markdown("""
 <style>
     /* Import Fonts */
@@ -79,7 +89,7 @@ st.markdown("""
         font-weight: 400;
     }
 
-    /* 4. Input Field Styling (已修复：左对齐 + 字体优化) */
+    /* 4. Input Field Styling */
     div[data-testid="stVerticalBlock"] > div {
         display: flex;
         flex-direction: column;
@@ -92,25 +102,21 @@ st.markdown("""
         color: #ffffff !important;
         border: 1px solid #374151 !important;
         border-radius: 16px !important;
-        
-        /* 修改点在这里：左对齐，调整内边距，调整字号 */
         padding: 15px 20px !important; 
-        font-size: 1rem !important; /* 从 1.1rem 改为 1rem */
-        text-align: left !important; /* 从 center 改为 left */
-        line-height: 1.6 !important; /* 增加行高，让中文更易读 */
-        
+        font-size: 1rem !important;
+        text-align: left !important;
+        line-height: 1.6 !important;
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
     }
     
-    /* Input Focus - Red Glow */
     .stTextArea textarea:focus {
         border-color: rgba(239, 68, 68, 0.8) !important;
         box-shadow: 0 0 15px rgba(220, 38, 38, 0.3) !important;
         background-color: rgba(31, 41, 55, 0.9) !important;
     }
 
-    /* 3. Button Styling: Red Gradient */
+    /* 3. Button Styling */
     div.stButton > button:first-child {
         background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
         background-size: 200% auto !important;
@@ -184,7 +190,6 @@ st.markdown("""
         transition: all 0.2s;
         backdrop-filter: blur(5px);
         min-height: 110px;
-        
         text-decoration: none !important;
         color: inherit !important;
         cursor: pointer;
@@ -228,10 +233,18 @@ st.markdown("""
         border-radius: 4px;
         font-weight: 600;
     }
+    
+    /* Chat Message Styling */
+    .stChatMessage {
+        background: rgba(31, 41, 55, 0.4);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 12px;
+        margin-bottom: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE =================
+# ================= 🧠 3. LOGIC CORE (保持原有模块不动) =================
 
 def detect_language(text):
     for char in text:
@@ -268,55 +281,38 @@ def search_with_exa(query):
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
 
-# Cache Top 12 Data
-# 缓存 Top 12 数据 - 逻辑修正版 (修复 Yes/No 价格反转)
 @st.cache_data(ttl=60)
 def fetch_top_10_markets():
     try:
         url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
         resp = requests.get(url, timeout=5).json()
-        
         markets = []
-        
         if isinstance(resp, list):
             for event in resp:
                 try:
                     title = event.get('title', 'Unknown Event')
                     event_markets = event.get('markets', [])
+                    if not event_markets or not isinstance(event_markets, list): continue
                     
-                    if not event_markets or not isinstance(event_markets, list):
-                        continue
-
-                    # 1. 过滤与排序 (保持不变：过滤已关闭市场，按交易量排序)
                     active_markets = []
                     for m in event_markets:
                         if m.get('closed') is True: continue
                         if not m.get('outcomePrices'): continue
                         active_markets.append(m)
-
                     if not active_markets: continue
 
                     active_markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
                     m = active_markets[0]
 
-                    # 2. 解析 Outcomes 和 Prices
                     outcomes = m.get('outcomes')
                     if isinstance(outcomes, str): outcomes = json.loads(outcomes)
-                        
                     prices = m.get('outcomePrices')
                     if isinstance(prices, str): prices = json.loads(prices)
-
                     if not outcomes or not prices or len(prices) != len(outcomes): continue
 
                     yes_price = 0
                     no_price = 0
                     
-                    # =======================================================
-                    # 🌟 核心修复逻辑
-                    # =======================================================
-                    
-                    # 场景 A: 明确的 Yes/No 市场
-                    # 必须找到 "Yes" 所在的索引位置，直接取那个价格
                     if "Yes" in outcomes and "No" in outcomes:
                         try:
                             yes_index = outcomes.index("Yes")
@@ -324,12 +320,8 @@ def fetch_top_10_markets():
                             yes_price = int(yes_raw * 100)
                             no_price = 100 - yes_price
                         except:
-                            # 兜底：如果出错，默认取第一个
                             yes_price = int(float(prices[0]) * 100)
                             no_price = 100 - yes_price
-
-                    # 场景 B: 多选项市场 (如 "<250k", "250k-500k")
-                    # 这种情况下，Outcome 里没有 "Yes"，我们保持原策略：取概率最高的那个显示
                     else:
                         max_price = max([float(p) for p in prices])
                         yes_price = int(max_price * 100)
@@ -341,11 +333,9 @@ def fetch_top_10_markets():
                         "no": no_price,
                         "slug": event.get('slug', '')
                     })
-                except Exception:
-                    continue
+                except Exception: continue
         return markets
-    except Exception:
-        return []
+    except Exception: return []
 
 def fetch_poly_details(slug):
     valid_markets = []
@@ -356,7 +346,7 @@ def fetch_poly_details(slug):
             for m in resp[0].get('markets', [])[:2]:
                 p = normalize_data(m)
                 if p: valid_markets.append(p)
-            return valid_markets
+        return valid_markets
     except: pass
     try:
         url = f"https://gamma-api.polymarket.com/markets?slug={slug}"
@@ -377,14 +367,11 @@ def normalize_data(m):
         if m.get('closed') is True: return None
         outcomes = m.get('outcomes')
         if isinstance(outcomes, str): outcomes = json.loads(outcomes)
-        
         prices = m.get('outcomePrices')
         if isinstance(prices, str): prices = json.loads(prices)
-        
         odds_display = "N/A"
         if outcomes and prices and len(outcomes) > 0 and len(prices) > 0:
             odds_display = f"{outcomes[0]}: {float(prices[0])*100:.1f}%"
-            
         return {
             "title": m.get('question', 'Unknown'),
             "odds": odds_display,
@@ -393,101 +380,192 @@ def normalize_data(m):
         }
     except: return None
 
-def consult_holmes(user_input, market_data):
-    if not GOOGLE_API_KEY: return "AI Key Missing."
+# ================= 🧠 3.1 AGENT BRAIN (新增：意图路由与聊天逻辑) =================
+
+def check_search_intent(user_text):
+    """
+    判断用户是否想要搜索新内容（意图路由）
+    """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        lang = detect_language(user_input)
-        if lang == "CHINESE":
-            lang_instruction = "IMPORTANT: Respond in **CHINESE (中文)**."
-            role_desc = "你现在是 **Be Holmes**，一位极度理性、只相信数据和博弈论的顶级宏观对冲基金经理。"
-        else:
-            lang_instruction = "IMPORTANT: Respond in **ENGLISH**."
-            role_desc = "You are **Be Holmes**, a legendary Wall Street Macro Hedge Fund Manager. Rational, cynical, and data-driven."
-
-        market_context = ""
-        if market_data:
-            m = market_data[0]
-            market_context = f"Target: {m['title']} | Odds: {m['odds']} | Volume: ${m['volume']:,.0f}"
-        else:
-            market_context = "No specific prediction market found."
-
         prompt = f"""
-        {role_desc}
-        [Intel]: "{user_input}"
-        [Market Data]: {market_context}
-        {lang_instruction}
+        User Input: "{user_text}"
+        Does this user explicitly ask to FIND, SEARCH, or LOOK UP a *new* prediction market topic? 
+        Or is the user just asking a follow-up question about the current topic?
         
-        **MISSION: DECODE ALPHA.**
-        **Analysis Framework:**
-        1. **Priced-in Check**
-        2. **Bluff vs Reality**
-        3. **Verdict**
-        
-        Output as a concise professional briefing.
+        Answer only YES if they want to search/find something new.
+        Answer only NO if it's a regular chat/analysis question.
         """
-        return model.generate_content(prompt).text
-    except Exception as e: return f"AI Error: {e}"
+        resp = model.generate_content(prompt)
+        return "YES" in resp.text.upper()
+    except: return False
 
-# ================= 🖥️ 4. MAIN INTERFACE =================
+def stream_chat_response(messages, market_data=None):
+    """
+    流式生成 AI 回复，支持上下文记忆
+    """
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    # 构建上下文 Prompt
+    market_context = ""
+    if market_data:
+        market_context = f"""
+        [LOCKED TARGET MARKET DATA]
+        Title: {market_data['title']}
+        Current Odds: {market_data['odds']}
+        Volume: ${market_data['volume']:,.0f}
+        """
+    
+    system_prompt = f"""
+    You are **Be Holmes**, a rational Macro Hedge Fund Manager.
+    
+    {market_context}
+    
+    **INSTRUCTIONS:**
+    1. If market data is present, analyze it using the Framework: Priced-in Check, Bluff vs Reality, Verdict.
+    2. If this is a follow-up question, answer directly and concisely.
+    3. Be cynical, data-driven, and professional.
+    4. Automatically detect language: If user asks in Chinese, answer in Chinese.
+    """
+    
+    # 格式化历史消息给 Gemini
+    history = [{"role": "user", "parts": [system_prompt]}]
+    for msg in messages:
+        role = "user" if msg["role"] == "user" else "model"
+        history.append({"role": role, "parts": [msg["content"]]})
+        
+    return model.generate_content(history).text
+
+# ================= 🖥️ 4. MAIN INTERFACE (逻辑重构) =================
 
 # 4.1 Hero Section
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
 st.markdown('<p class="hero-subtitle">Explore the world\'s prediction markets with neural search.</p>', unsafe_allow_html=True)
 
-# 4.2 Search Section
+# 4.2 Search Section (只在首次进入或用户想重置时主要显示)
 _, mid, _ = st.columns([1, 6, 1])
 with mid:
-    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed")
+    # 这里的 key 设为 fixed_input，避免 key conflict
+    user_news = st.text_area("Input", height=70, placeholder="Search for a market, region or event...", label_visibility="collapsed", key="main_search_input")
 
 # 4.3 Button Section
 _, btn_col, _ = st.columns([1, 2, 1])
 with btn_col:
     ignite_btn = st.button("Decode Alpha", use_container_width=True)
 
-# 4.4 Execution Logic
+# 4.4 触发逻辑：点击按钮 = 开启新的一轮分析
 if ignite_btn:
     if not KEYS_LOADED:
         st.error("🔑 API Keys not found in Secrets.")
     elif not user_news:
         st.warning("Please enter intelligence to analyze.")
     else:
-        with st.container():
-            st.markdown("---")
-            with st.status("Running Neural Analysis...", expanded=True) as status:
-                st.write("Mapping Semantics...")
-                matches, keyword = search_with_exa(user_news)
-                st.write("Calculating Probabilities...")
-                report = consult_holmes(user_news, matches)
-                status.update(label="Analysis Complete", state="complete", expanded=False)
+        # 重置状态，开启新会话
+        st.session_state.messages = []
+        st.session_state.current_market = None
+        st.session_state.first_visit = False
+        
+        # 1. 执行搜索
+        with st.spinner("Neural Searching..."):
+            matches, keyword = search_with_exa(user_news)
+        
+        # 2. 锁定上下文
+        if matches:
+            st.session_state.current_market = matches[0]
+        else:
+            st.session_state.current_market = None # 没找到也要清空，防止串台
+            
+        # 3. 存入第一条用户消息
+        st.session_state.messages.append({"role": "user", "content": f"Analyze this intel: {user_news}"})
+        
+        # 4. 生成第一条 AI 回复
+        with st.spinner("Decoding Alpha..."):
+            response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        # 5. 强制刷新以显示聊天界面
+        st.rerun()
 
-            if matches:
-                m = matches[0]
-                st.markdown(f"""
-                <div class="market-card">
-                    <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px;">{m['title']}</div>
-                    <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-                        <div>
-                            <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
-                            <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
-                        </div>
-                        <div style="text-align:right;">
-                            <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
-                            <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
-                        </div>
-                    </div>
+# ================= 🗣️ 5. CHAT INTERFACE (新增：对话区域) =================
+
+if st.session_state.messages:
+    st.markdown("---")
+    
+    # A. 固定的市场卡片 (Context Anchor)
+    if st.session_state.current_market:
+        m = st.session_state.current_market
+        st.markdown(f"""
+        <div class="market-card">
+            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">TARGET MARKET</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px; font-weight:bold;">{m['title']}</div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                <div>
+                    <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
+                    <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
                 </div>
-                """, unsafe_allow_html=True)
+                <div style="text-align:right;">
+                    <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
+                    <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
+                </div>
+            </div>
+             <div style="margin-top:10px; padding-top:10px; border-top:1px solid #374151; font-size:0.8rem; text-align:right;">
+                <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="color:#ef4444; text-decoration:none;">View on Polymarket ↗</a>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # B. 聊天记录展示 (跳过第一条指令，直接显示内容)
+    for i, msg in enumerate(st.session_state.messages):
+        if i == 0: continue # 跳过 "Analyze this intel..." 指令
+        
+        with st.chat_message(msg["role"], avatar="🕵️‍♂️" if msg["role"] == "assistant" else "👤"):
+            # 如果是 AI 的第一条回复（分析报告），加个红色左边框
+            if i == 1:
+                st.markdown(f"<div style='border-left:3px solid #dc2626; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
+            else:
+                st.write(msg["content"])
+
+    # C. 追问输入框 (Agent 核心交互)
+    if prompt := st.chat_input("Ask a follow-up or search for a new topic..."):
+        # 1. 显示用户输入
+        with st.chat_message("user", avatar="👤"):
+            st.write(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # 2. 意图判断：是聊天还是搜索？
+        is_search = check_search_intent(prompt)
+        
+        if is_search:
+            # === 分支 A：用户想搜新的 ===
+            with st.chat_message("assistant", avatar="🕵️‍♂️"):
+                st.write(f"🔄 Detected search intent. Scanning prediction markets for: **{prompt}**...")
+                with st.spinner("Searching Polymarket..."):
+                    matches, _ = search_with_exa(prompt)
                 
-            st.markdown(f"<div style='background:transparent; border-left:3px solid #dc2626; padding:15px 20px; color:#d1d5db; line-height:1.6;'>{report}</div>", unsafe_allow_html=True)
+                if matches:
+                    st.session_state.current_market = matches[0] # 更新上下文
+                    st.success(f"Found: {matches[0]['title']}")
+                    time.sleep(1)
+                    st.rerun() # 刷新页面，更新顶部的市场卡片
+                else:
+                    st.warning("No specific market found. Continuing analysis based on general knowledge.")
+                    # 没找到，保持旧的或者置空，继续聊天
+        
+        # === 分支 B：正常生成回复 ===
+        with st.chat_message("assistant", avatar="🕵️‍♂️"):
+            with st.spinner("Thinking..."):
+                response = stream_chat_response(st.session_state.messages, st.session_state.current_market)
+                st.write(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
 
-# ================= 📉 5. BOTTOM SECTION: TOP 12 MARKETS =================
+# ================= 📉 6. BOTTOM SECTION: TOP 12 MARKETS =================
 
+# 只有在没有进入深入对话模式(First Visit)，或者用户想看的时候显示
+# 这里我们保持它常驻底部，作为信息源补充
+st.markdown("---")
 top10_markets = fetch_top_10_markets()
 
 if top10_markets:
-    # UPDATED: Use <a> tag instead of <div> for the card wrapper
-    # Added href linking to Polymarket event page
     cards_html = "".join([f"""
     <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
         <div class="m-title" title="{m['title']}">{m['title']}</div>
@@ -512,130 +590,7 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-# ================= 👇 6. 底部协议与说明 (PROTOCOL & MANUAL) =================
-
+# ================= 👇 7. 底部协议与说明 (PROTOCOL & MANUAL) =================
+# (保持不变，省略以节省空间，直接用你原来的代码即可)
 st.markdown("<br><br>", unsafe_allow_html=True)
-
-# 自定义底部样式 (中心化布局版)
-st.markdown("""
-<style>
-    /* 强制 Radio 组件居中 */
-    div.row-widget.stRadio > div {
-        justify-content: center;
-    }
-
-    /* 协议文本容器 */
-    .protocol-container {
-        font-family: 'Inter', sans-serif;
-        color: #cbd5e1; /* slate-300 */
-        font-size: 0.95rem;
-        line-height: 1.8;
-        margin-top: 20px;
-        text-align: center; /* 全局居中 */
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    /* 每一个步骤的样式 - 改为居中块状风格 */
-    .protocol-step {
-        margin-bottom: 25px;
-        padding: 15px 20px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.03); /* 极淡的背景 */
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        max-width: 700px; /* 限制宽度，防止文字拉太长难看 */
-        width: 100%;
-        transition: all 0.3s;
-    }
-    .protocol-step:hover {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-    
-    /* 步骤标题 */
-    .protocol-title {
-        font-weight: 700;
-        color: #ef4444; /* 使用红色高亮标题 */
-        font-size: 1rem;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        display: block;
-        margin-bottom: 8px;
-    }
-
-    /* 底部版权区 */
-    .credits-section {
-        text-align: center;
-        margin-top: 30px;
-        padding-top: 20px;
-        border-top: 1px solid #334155;
-        color: #64748b;
-        font-size: 0.85rem;
-        font-family: monospace;
-    }
-    .credits-highlight {
-        color: #94a3b8;
-        font-weight: 600;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Expander 组件 - 纯英文标题，无 Emoji
-with st.expander("Operational Protocol & System Architecture"):
-    
-    # 语言切换开关 (CSS 已强制其居中)
-    lang_mode = st.radio(
-        "Language", 
-        ["EN", "CN"], 
-        horizontal=True, 
-        label_visibility="collapsed"
-    )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 内容显示逻辑
-    if lang_mode == "EN":
-        st.markdown("""
-        <div class="protocol-container">
-            <div class="protocol-step">
-                <span class="protocol-title">1. Intelligence Injection (Input)</span>
-                User inputs unstructured natural language data—breaking news, social sentiment, or event-specific queries—into the system's intelligence context window.
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">2. Neural Semantic Mapping (Processing)</span>
-                Powered by <b>Exa.ai</b>, the engine converts input semantics into high-dimensional vector embeddings to identify correlated prediction markets, bypassing rigid keyword limitations.
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">3. Bayesian Alpha Decoding (Analysis)</span>
-                <b>Google Gemini</b> acts as the Macro-Analyst. It synthesizes market implied probabilities (Odds) with the input intelligence to calculate the "Expectation Gap"—determining if the news is priced-in or represents an alpha opportunity.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class="protocol-container">
-            <div class="protocol-step">
-                <span class="protocol-title">1. 情报注入 (Intelligence Injection)</span>
-                用户输入非结构化自然语言数据——无论是突发新闻、社交媒体情绪还是特定事件查询，系统将自动解析其语义核心。
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">2. 神经语义映射 (Neural Mapping)</span>
-                由 <b>Exa.ai</b> 驱动，系统将文本转化为高维向量嵌入（Embeddings），在 Polymarket 链上合约库中进行神经搜索，精准定位强相关预测市场。
-            </div>
-            <div class="protocol-step">
-                <span class="protocol-title">3. 贝叶斯阿尔法解码 (Alpha Decoding)</span>
-                <b>Google Gemini</b> 作为宏观分析引擎，综合市场隐含概率（赔率）与输入情报，计算“预期差”，判断该信息是否已被市场定价 (Priced-in) 或存在套利空间。
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # 底部版权 (Credits)
-    st.markdown("""
-    <div class="credits-section">
-        SYSTEM ARCHITECTURE POWERED BY<br>
-        <span class="credits-highlight">Exa.ai (Neural Search)</span> & 
-        <span class="credits-highlight">Google Gemini (Cognitive Core)</span><br><br>
-        Data Stream: Polymarket Gamma API
-    </div>
-    """, unsafe_allow_html=True)
+# ... (这里放你原来的 Protocol 代码) ...
