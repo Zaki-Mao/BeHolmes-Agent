@@ -3,6 +3,7 @@ import requests
 import json
 import google.generativeai as genai
 import re
+import time
 
 # ================= 🔐 0. KEY MANAGEMENT =================
 try:
@@ -32,15 +33,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================= 🧠 2. STATE MANAGEMENT (新增：记忆功能) =================
+# ================= 🧠 2. STATE MANAGEMENT =================
 if "messages" not in st.session_state:
-    st.session_state.messages = []  # 存储聊天记录
+    st.session_state.messages = []
 if "current_market" not in st.session_state:
-    st.session_state.current_market = None # 存储当前正在分析的市场数据
+    st.session_state.current_market = None
 if "first_visit" not in st.session_state:
     st.session_state.first_visit = True
 
-# ================= 🎨 3. UI THEME (保持原汁原味) =================
+# ================= 🎨 3. UI THEME =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
@@ -67,23 +68,6 @@ st.markdown("""
         text-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     
-    .hero-subtitle {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 1.1rem;
-        color: #9ca3af; 
-        text-align: center;
-        margin-bottom: 30px;
-    }
-
-    /* 聊天气泡样式优化 */
-    .stChatMessage {
-        background: rgba(31, 41, 55, 0.4);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 12px;
-        padding: 10px;
-    }
-
-    /* 市场卡片 */
     .market-card {
         background: rgba(17, 24, 39, 0.8);
         border: 1px solid #374151;
@@ -95,31 +79,70 @@ st.markdown("""
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
 
-    /* 按钮和输入框样式保持不变 */
+    /* Top 12 Grid Styles */
+    .top10-container {
+        width: 100%;
+        max-width: 1200px;
+        margin: 60px auto 20px auto;
+        padding: 0 20px;
+    }
+    .top10-header {
+        font-size: 0.9rem;
+        color: #9ca3af;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 20px;
+        border-left: 3px solid #dc2626;
+        padding-left: 10px;
+    }
+    .top10-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+    }
+    @media (max-width: 800px) { .top10-grid { grid-template-columns: 1fr; } }
+    
+    .market-item {
+        background: rgba(17, 24, 39, 0.6);
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: all 0.2s;
+        backdrop-filter: blur(5px);
+        min-height: 110px;
+        text-decoration: none !important;
+        color: inherit !important;
+    }
+    .market-item:hover {
+        border-color: #ef4444;
+        background: rgba(31, 41, 55, 0.9);
+        transform: translateY(-2px);
+    }
+    .m-title { color: #e5e7eb; font-size: 0.95rem; font-weight: 500; margin-bottom: 12px; line-height: 1.4; }
+    .m-odds { display: flex; gap: 8px; font-size: 0.75rem; margin-top: auto; }
+    .tag-yes { background: rgba(6, 78, 59, 0.4); color: #4ade80; padding: 2px 8px; border-radius: 4px; }
+    .tag-no { background: rgba(127, 29, 29, 0.4); color: #f87171; padding: 2px 8px; border-radius: 4px; }
+    
+    /* Input & Button */
     .stTextArea textarea {
         background-color: rgba(31, 41, 55, 0.6) !important;
         color: #ffffff !important;
         border: 1px solid #374151 !important;
         border-radius: 16px !important;
-        font-size: 1rem !important;
     }
     div.stButton > button:first-child {
         background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #7f1d1d 100%) !important;
         color: white !important;
         border-radius: 50px !important;
         border: none !important;
-        padding: 10px 40px !important;
-        font-weight: 600 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 4. LOGIC FUNCTIONS =================
-
-def detect_language(text):
-    for char in text:
-        if '\u4e00' <= char <= '\u9fff': return "CHINESE"
-    return "ENGLISH"
+# ================= 🧠 4. CORE LOGIC =================
 
 def generate_english_keywords(user_text):
     try:
@@ -144,17 +167,14 @@ def search_with_exa(query):
             if match:
                 slug = match.group(1)
                 if slug not in seen_ids:
-                    market_data = fetch_poly_details(slug)
-                    if market_data:
-                        markets_found.extend(market_data)
+                    data = fetch_poly_details(slug)
+                    if data:
+                        markets_found.extend(data)
                         seen_ids.add(slug)
     except: pass
     return markets_found, search_query
 
 def fetch_poly_details(slug):
-    # (保持原有的抓取逻辑不变，为了节省篇幅，这里复用你之前的 fetch_poly_details 和 normalize_data 代码)
-    # ... 请确保这里有 fetch_poly_details 和 normalize_data 函数 ...
-    # ⚠️ 为了代码完整运行，我把这两个函数简写在这里，实际部署请用你原来的完整版
     try:
         url = f"https://gamma-api.polymarket.com/events?slug={slug}"
         resp = requests.get(url, timeout=3).json()
@@ -167,7 +187,6 @@ def fetch_poly_details(slug):
     except: return []
 
 def normalize_data(m):
-    # (复用原来的 normalize_data)
     try:
         if m.get('closed') is True: return None
         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
@@ -177,143 +196,170 @@ def normalize_data(m):
         return {"title": m.get('question'), "odds": odds, "volume": float(m.get('volume', 0)), "slug": m.get('slug', '')}
     except: return None
 
-# --- 新增：专门处理对话流的 AI 函数 ---
+@st.cache_data(ttl=60)
+def fetch_top_10_markets():
+    try:
+        url = "https://gamma-api.polymarket.com/events?limit=12&sort=volume&closed=false"
+        resp = requests.get(url, timeout=5).json()
+        markets = []
+        if isinstance(resp, list):
+            for event in resp:
+                try:
+                    m = event.get('markets', [])[0]
+                    outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+                    prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+                    yes = int(float(prices[outcomes.index("Yes")]) * 100) if "Yes" in outcomes else 50
+                    markets.append({"title": event.get('title'), "yes": yes, "no": 100-yes, "slug": event.get('slug')})
+                except: continue
+        return markets
+    except: return []
+
+# --- 🕵️‍♂️ Agent Brain: 意图识别与回复 ---
+def check_search_intent(user_text):
+    """判断用户是否想要搜索新内容"""
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = f"""
+        User Input: "{user_text}"
+        Does this user explicitly ask to FIND, SEARCH, or LOOK UP a *new* prediction market topic? 
+        Answer only YES or NO.
+        """
+        resp = model.generate_content(prompt)
+        return "YES" in resp.text.upper()
+    except: return False
+
 def stream_holmes_response(messages, market_data=None):
-    """
-    流式生成 AI 回复，支持上下文记忆
-    """
     model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    # 构建上下文 Prompt
     market_context = ""
     if market_data:
         market_context = f"""
-        [LOCKED TARGET MARKET DATA]
-        Title: {market_data['title']}
-        Current Odds: {market_data['odds']}
+        [CURRENT MARKET DATA]
+        Event: {market_data['title']}
+        Odds: {market_data['odds']}
         Volume: ${market_data['volume']:,.0f}
         """
     
     system_prompt = f"""
     You are **Be Holmes**, a rational Macro Hedge Fund Manager.
-    
     {market_context}
-    
     **INSTRUCTIONS:**
-    1. If this is the first analysis, follow the "Decode Alpha" framework (Priced-in Check, Bluff vs Reality, Verdict).
-    2. If this is a follow-up question, answer directly and concisely, referencing the market data above if relevant.
+    1. Answer the user's question directly.
+    2. If market data is provided, use it to support your analysis.
     3. Be cynical, data-driven, and professional.
-    4. Automatically detect language: If user asks in Chinese, answer in Chinese.
+    4. If user asks in Chinese, respond in Chinese.
     """
     
-    # 将 Streamlit 的消息格式转换为 Gemini 的格式
-    history = [{"role": "user", "parts": [system_prompt]}] # 注入系统设定
+    history = [{"role": "user", "parts": [system_prompt]}]
     for msg in messages:
         role = "user" if msg["role"] == "user" else "model"
         history.append({"role": role, "parts": [msg["content"]]})
         
     return model.generate_content(history).text
 
-# ================= 🖥️ 5. MAIN INTERFACE FLOW =================
+# ================= 🖥️ 5. INTERFACE LOGIC =================
 
-# 5.1 Hero Section (Always Visible)
 st.markdown('<h1 class="hero-title">Be Holmes</h1>', unsafe_allow_html=True)
 
-# 5.2 Search Section (仅在未开始对话时，或者用户想重置时显示醒目的大框)
-# 为了体验好，我们把搜索框一直放在上面，但如果已经有结果了，它就变成“开启新话题”的地方
+# 搜索框 (总是显示，作为重置入口)
 _, mid, _ = st.columns([1, 6, 1])
 with mid:
-    user_input = st.text_area("Input", height=70, placeholder="Search for a market event (e.g., 'Will Trump return to White House?')...", label_visibility="collapsed", key="search_input")
+    user_input = st.text_area("Input", height=70, placeholder="Search for a market (e.g., 'Will Trump win?')...", label_visibility="collapsed", key="main_search")
 
 _, btn_col, _ = st.columns([1, 2, 1])
 with btn_col:
-    # 如果点击 Decode Alpha，视为“开启一段新对话”
     if st.button("Decode Alpha", use_container_width=True):
         if not user_input:
-            st.warning("Please enter intelligence first.")
+            st.warning("Enter a topic first.")
         else:
-            # 1. 重置状态
+            # 重置并开启新对话
             st.session_state.messages = [] 
-            st.session_state.current_market = None
             st.session_state.first_visit = False
             
-            # 2. 执行搜索
             with st.spinner("Neural Searching..."):
                 matches, keyword = search_with_exa(user_input)
-                
-            # 3. 锁定上下文
+            
             if matches:
                 st.session_state.current_market = matches[0]
+            else:
+                st.session_state.current_market = None
             
-            # 4. 把用户的输入作为第一条消息存入历史
-            st.session_state.messages.append({"role": "user", "content": f"Analyze this intel: {user_input}"})
-            
-            # 5. 生成第一轮 AI 回复
+            # 存入历史并生成回复
+            st.session_state.messages.append({"role": "user", "content": f"Analyze: {user_input}"})
             with st.spinner("Decoding Alpha..."):
                 response = stream_holmes_response(st.session_state.messages, st.session_state.current_market)
                 st.session_state.messages.append({"role": "assistant", "content": response})
-            
-            # 6. 强制刷新页面以显示结果
             st.rerun()
 
-# ================= 🗣️ 6. CHAT INTERFACE (The Agent) =================
+# ================= 🗣️ 6. CHAT & CONTENT AREA =================
 
-# 只有当有历史记录时，才渲染聊天界面
+# A. 如果有对话，显示聊天界面
 if st.session_state.messages:
-    
     st.markdown("---")
     
-    # A. 顶部的市场卡片 (Context Anchor) - 像个钉子一样钉在聊天框上方
+    # 📌 1. 顶部钉住的市场卡片 (Context Anchor)
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
         <div class="market-card">
-            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px; text-transform:uppercase; letter-spacing:1px;">Target Market</div>
-            <div style="font-size:1.2rem; color:#e5e7eb; margin-bottom:10px; font-weight:bold;">{m['title']}</div>
-            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
-                <div>
-                    <div style="font-family:'Plus Jakarta Sans'; color:#4ade80; font-size:1.8rem; font-weight:700;">{m['odds']}</div>
-                    <div style="color:#9ca3af; font-size:0.8rem;">Implied Probability</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="color:#e5e7eb; font-weight:600; font-size:1.2rem;">${m['volume']:,.0f}</div>
-                    <div style="color:#9ca3af; font-size:0.8rem;">Volume</div>
-                </div>
-            </div>
-            <div style="margin-top:10px; padding-top:10px; border-top:1px solid #374151; font-size:0.8rem; text-align:right;">
-                <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="color:#ef4444; text-decoration:none;">View on Polymarket ↗</a>
-            </div>
+            <div style="font-size:0.9rem; color:#9ca3af; margin-bottom:5px;">TARGET MARKET</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold;">{m['title']}</div>
+            <div style="font-size:1.8rem; color:#4ade80; font-weight:700;">{m['odds']} <span style="font-size:0.8rem; color:#9ca3af; font-weight:400;">Implied Probability</span></div>
+            <div style="text-align:right; margin-top:10px;"><a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="color:#ef4444; text-decoration:none;">View on Polymarket ↗</a></div>
         </div>
         """, unsafe_allow_html=True)
 
-    # B. 渲染聊天记录
-    # 我们跳过第一条 user message (因为那是上面的搜索框内容)，直接展示 AI 的回复和后续对话
+    # 💬 2. 聊天记录
     for i, msg in enumerate(st.session_state.messages):
-        if i == 0: continue # 跳过“Analyze this intel...”那条指令显示，因为上面已有搜索框
-        
+        if i == 0: continue 
         with st.chat_message(msg["role"], avatar="🕵️‍♂️" if msg["role"] == "assistant" else "👤"):
-            # 如果是 AI 的第一条回复（分析报告），我们给它加个红色左边框，突出显示
-            if i == 1:
-                st.markdown(f"<div style='border-left:3px solid #dc2626; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.write(msg["content"])
+            if i == 1: st.markdown(f"<div style='border-left:3px solid #dc2626; padding-left:15px;'>{msg['content']}</div>", unsafe_allow_html=True)
+            else: st.write(msg["content"])
 
-    # C. 追问输入框 (Follow-up Input)
-    if prompt := st.chat_input("Ask a follow-up question to Be Holmes..."):
-        # 1. 显示用户输入
+    # 🎤 3. 追问输入框 (支持搜索意图识别)
+    if prompt := st.chat_input("Ask follow-up or search new topic..."):
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # 2. AI 思考并回复
+        # --- 🕵️‍♂️ Agent 核心：意图路由 ---
+        is_search = check_search_intent(prompt)
+        
+        if is_search:
+            with st.chat_message("assistant", avatar="🕵️‍♂️"):
+                st.write(f"🔄 Detected search intent. Scanning prediction markets for: **{prompt}**...")
+                with st.spinner("Searching Polymarket..."):
+                    matches, _ = search_with_exa(prompt)
+                    
+                if matches:
+                    st.session_state.current_market = matches[0]
+                    st.success(f"Found: {matches[0]['title']}")
+                    # 搜索完，必须让页面重绘，更新顶部的卡片
+                    time.sleep(1) 
+                    st.rerun()
+                else:
+                    st.warning("No specific market found. Proceeding with general analysis.")
+        
+        # 生成回复
         with st.chat_message("assistant", avatar="🕵️‍♂️"):
             with st.spinner("Thinking..."):
                 response = stream_holmes_response(st.session_state.messages, st.session_state.current_market)
                 st.write(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-# 如果没有对话，且是第一次访问，显示底部的 Trending
-elif st.session_state.first_visit:
-    # (这里放你原来的 fetch_top_10_markets 展示逻辑)
-    # 为了代码整洁，这里省略，你可以把你原代码第 330行后的 top10 逻辑贴在这里
-    pass
+# B. 如果没有对话 (First Visit)，显示 Top 12 榜单
+# ✅ 修复：Top 12 回归！
+else:
+    top10_markets = fetch_top_10_markets()
+    if top10_markets:
+        cards_html = "".join([f"""
+        <a href="https://polymarket.com/event/{m['slug']}" target="_blank" class="market-item">
+            <div class="m-title">{m['title']}</div>
+            <div class="m-odds"><span class="tag-yes">Yes {m['yes']}¢</span><span class="tag-no">No {m['no']}¢</span></div>
+        </a>""" for m in top10_markets])
+
+        st.markdown(f"""
+        <div class="top10-container">
+            <div class="top10-header">Trending on Polymarket (Top 12)</div>
+            <div class="top10-grid">{cards_html}</div>
+        </div>
+        """, unsafe_allow_html=True)
