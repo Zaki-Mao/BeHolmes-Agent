@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import re
 import time
 
@@ -137,6 +138,7 @@ st.markdown("""
     .tag-yes { background: rgba(6, 78, 59, 0.4); color: #4ade80; padding: 2px 8px; border-radius: 4px; font-weight: bold;}
     .tag-no { background: rgba(127, 29, 29, 0.4); color: #f87171; padding: 2px 8px; border-radius: 4px; font-weight: bold;}
     
+    /* Input & Button */
     .stTextArea textarea {
         background-color: rgba(31, 41, 55, 0.6) !important;
         color: #ffffff !important;
@@ -160,12 +162,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 3. LOGIC CORE =================
+# ================= 🧠 3. LOGIC CORE (Fixed Search & Data) =================
 
 def generate_english_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"""Task: Extract English search keywords for Polymarket. Input: "{user_text}". Output: Keywords only."""
+        # 🛡️ 增加 try-except 防止这里也报错
         resp = model.generate_content(prompt)
         return resp.text.strip()
     except: return user_text
@@ -176,10 +179,10 @@ def search_with_exa(query):
     markets_found, seen_ids = [], set()
     try:
         exa = Exa(EXA_API_KEY)
-        # 🟢 修正：保持稳定版的搜索逻辑，增加结果数到 10 以提高命中率
+        # 🟢 修正回归：恢复 "prediction market about" 锚点，但数量加到 15
         search_response = exa.search(
             f"prediction market about {search_query}",
-            num_results=10, 
+            num_results=15, 
             type="neural", 
             include_domains=["polymarket.com"]
         )
@@ -188,13 +191,13 @@ def search_with_exa(query):
             match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', result.url)
             if match:
                 slug = match.group(1)
-                # 过滤无关页面
                 if slug not in ['profile', 'login', 'leaderboard', 'rewards', 'orders', 'activity'] and slug not in seen_ids:
                     market_data = fetch_poly_details(slug)
                     if market_data:
                         markets_found.extend(market_data)
                         seen_ids.add(slug)
-                        if len(markets_found) >= 3: break # 找到3个最相关的就够了
+                        # 找到 5 个有效结果就停止，兼顾速度
+                        if len(markets_found) >= 5: break
                         
     except Exception as e: print(f"Search error: {e}")
     return markets_found, search_query
@@ -228,7 +231,7 @@ def fetch_top_10_markets():
                     if isinstance(prices, str): prices = json.loads(prices)
                     if not outcomes or not prices or len(prices) != len(outcomes): continue
 
-                    # 🌟 逻辑修复：Yes/No 智能判断
+                    # 🌟 修复：智能识别 Yes 价格，防止 0/100
                     yes_price = 0
                     no_price = 0
                     
@@ -242,7 +245,9 @@ def fetch_top_10_markets():
                             yes_price = int(float(prices[0]) * 100)
                             no_price = 100 - yes_price
                     else:
-                        max_price = max([float(p) for p in prices])
+                        # 多选项市场，找最大的
+                        float_prices = [float(p) for p in prices]
+                        max_price = max(float_prices)
                         yes_price = int(max_price * 100)
                         no_price = 100 - yes_price
 
@@ -300,7 +305,8 @@ def normalize_data(m):
             float_prices = [float(p) for p in prices]
             max_p = max(float_prices)
             max_idx = float_prices.index(max_p)
-            display_label = f"{outcomes[max_idx]}: {max_p*100:.1f}%"
+            top_name = outcomes[max_idx]
+            display_label = f"{top_name}: {max_p*100:.1f}%"
 
         return {
             "title": m.get('question', 'Unknown'),
@@ -310,7 +316,15 @@ def normalize_data(m):
         }
     except: return None
 
-# ================= 🧠 3.1 AGENT BRAIN =================
+# ================= 🧠 3.1 AGENT BRAIN (Safety Unlocked) =================
+
+# 🛡️ 安全设置：全部放行，防止 ValueError
+safety_config = {
+    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+}
 
 def check_search_intent(user_text):
     try:
@@ -320,7 +334,7 @@ def check_search_intent(user_text):
         Does this user explicitly ask to FIND, SEARCH, or LOOK UP a *new* prediction market topic? 
         Answer only YES or NO.
         """
-        resp = model.generate_content(prompt)
+        resp = model.generate_content(prompt, safety_settings=safety_config)
         return "YES" in resp.text.upper()
     except: return False
 
@@ -355,14 +369,14 @@ def stream_chat_response(messages, market_data=None):
         role = "user" if msg["role"] == "user" else "model"
         history.append({"role": role, "parts": [msg["content"]]})
     
-    # 🔴 关键修复：增加 try-except 捕获 ValueError (Safety Filters)
+    # 🔴 关键修复：加入 try-except 和 safety_settings
     try:
-        response = model.generate_content(history)
+        response = model.generate_content(history, safety_settings=safety_config)
         return response.text
     except ValueError:
-        return "⚠️ Safety Filter Triggered: I cannot generate a response for this specific query due to content safety policies. Please try asking in a different way."
+        return "⚠️ **Analysis Halted:** Content flagged by safety filters. (Try rewording your query slightly)."
     except Exception as e:
-        return f"⚠️ AI Error: {str(e)}"
+        return f"⚠️ System Error: {str(e)}"
 
 # ================= 🖥️ 4. MAIN INTERFACE =================
 
