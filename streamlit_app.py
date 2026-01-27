@@ -211,46 +211,29 @@ st.markdown("""
         opacity: 0.8;
     }
 
-    /* 🔥🔥 NEW: Advanced Footer Hub Styles 🔥🔥 */
-    .hub-grid {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 12px;
-        margin-bottom: 20px;
-    }
-    .hub-card {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+    /* 🔥🔥 NEW: Hub Button Styles (CSS for HTML buttons) 🔥🔥 */
+    .hub-btn {
+        display: block;
+        width: 100%;
+        padding: 12px 5px;
         background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 10px;
-        padding: 12px;
-        text-decoration: none !important;
-        transition: all 0.3s ease;
-        backdrop-filter: blur(10px);
-        height: 85px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        text-align: center;
+        text-decoration: none;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(5px);
+        margin-bottom: 10px;
     }
-    .hub-card:hover {
+    .hub-btn:hover {
         background: rgba(255, 255, 255, 0.08);
         border-color: rgba(59, 130, 246, 0.5); /* Blue glow */
-        transform: translateY(-4px);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
     }
-    .hub-icon { 
-        font-size: 1.4rem; 
-        margin-bottom: 6px; 
-        opacity: 0.8;
-    }
-    .hub-name { 
-        font-size: 0.75rem; 
-        font-weight: 600; 
-        color: #9ca3af;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-    }
-    .hub-card:hover .hub-name { color: #ffffff; }
+    .hub-emoji { font-size: 1.2rem; display: block; margin-bottom: 4px; }
+    .hub-text { font-size: 0.75rem; color: #9ca3af; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+    .hub-btn:hover .hub-text { color: white; }
 
     /* Trending Tags */
     .trend-container {
@@ -264,23 +247,30 @@ st.markdown("""
         background: rgba(29, 155, 240, 0.1);
         border: 1px solid rgba(29, 155, 240, 0.2);
         color: #1d9bf0;
-        padding: 4px 10px;
+        padding: 4px 12px;
         border-radius: 20px;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         font-family: 'Inter', sans-serif;
         cursor: default;
+        transition: all 0.3s;
+    }
+    .trend-tag:hover {
+        background: rgba(29, 155, 240, 0.2);
+        box-shadow: 0 0 10px rgba(29, 155, 240, 0.2);
     }
     .trend-vol {
         font-size: 0.7rem;
-        opacity: 0.7;
-        margin-left: 5px;
+        opacity: 0.6;
+        margin-left: 6px;
+        border-left: 1px solid rgba(255,255,255,0.2);
+        padding-left: 6px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ================= 🧠 3. LOGIC CORE =================
 
-# --- A. News Logic (缓存 5 分钟) ---
+# --- A. News Logic ---
 @st.cache_data(ttl=300)
 def fetch_rss_news():
     rss_urls = [
@@ -292,7 +282,6 @@ def fetch_rss_news():
     try:
         for url in rss_urls:
             feed = feedparser.parse(url)
-            # 🔥 抓取更多：每个源抓 10 条
             for entry in feed.entries[:10]: 
                 news.append({
                     "title": entry.title,
@@ -302,7 +291,26 @@ def fetch_rss_news():
     except: pass
     return news[:30] 
 
-# --- B. Market Logic (Categorized) ---
+# --- 🔥 B. Real-Time Trends Logic (Google Trends as Proxy) ---
+# Twitter API 收费极高，使用 Google Trends RSS 作为最佳免费平替
+@st.cache_data(ttl=3600) # 1小时缓存
+def fetch_real_trends():
+    url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
+    trends = []
+    try:
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:10]:
+            # 尝试提取热度 (approx_traffic)
+            traffic = "10K+"
+            if hasattr(entry, 'ht_approx_traffic'):
+                traffic = entry.ht_approx_traffic
+            trends.append({"name": entry.title, "vol": traffic})
+    except: 
+        # Fallback if connection fails
+        trends = [{"name": "Market Crash", "vol": "500K+"}, {"name": "Bitcoin", "vol": "200K+"}]
+    return trends
+
+# --- C. Market Logic (Categorized) ---
 @st.cache_data(ttl=60)
 def fetch_categorized_markets():
     try:
@@ -342,7 +350,7 @@ def fetch_categorized_markets():
         }
     except: return {"consensus": [], "battleground": []}
 
-# --- C. Search & AI Logic ---
+# --- D. Search & AI Logic ---
 def generate_english_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -457,7 +465,6 @@ st.markdown("""
 # --- 4.2 Main Search Bar (The Core Interaction) ---
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
-    # 检查是否有从新闻流点击过来的输入
     input_val = st.session_state.get("user_news_text", "")
     user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline or click a news item below to reality check...", label_visibility="collapsed")
     
@@ -502,15 +509,12 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
-        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:15px; font-style:italic;">
-            Sources: Reuters • TechCrunch • CoinDesk
-        </div>
         <style>
             @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每 1 秒刷新时间)
+        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新
         @st.fragment(run_every=1)
         def render_news_feed():
             # 1. 渲染全球时间
@@ -536,17 +540,16 @@ if not st.session_state.messages:
             mins, secs = divmod(seconds_left, 60)
             timer_str = f"{mins:02d}:{secs:02d}"
             
-            # 显示倒计时 (去除"Auto-rotating..."这种掉价文字)
             st.markdown(f"""
             <div style="display:flex; justify-content:flex-end; font-family:'JetBrains Mono'; font-size:0.7rem; color:#6b7280; margin-bottom:5px;">
                 NEXT SYNC IN: {timer_str}
             </div>
             """, unsafe_allow_html=True)
 
-            # 3. 获取新闻 (缓存300s)
+            # 3. 获取新闻
             all_news = fetch_rss_news()
             
-            # 3. 轮播逻辑
+            # 4. 轮播逻辑
             rotation_interval = 15
             current_timestamp = int(time.time())
             
@@ -564,7 +567,7 @@ if not st.session_state.messages:
             if not visible_news:
                 visible_news = all_news[:items_per_page]
 
-            # 4. 轮播进度条 (纯视觉条)
+            # 5. 轮播进度条
             seconds_in_cycle = current_timestamp % rotation_interval
             progress_pct = (seconds_in_cycle / rotation_interval) * 100
             
@@ -574,7 +577,7 @@ if not st.session_state.messages:
             </div>
             """, unsafe_allow_html=True)
 
-            # 5. 渲染双列新闻网格
+            # 6. 渲染双列新闻网格
             rows = [visible_news[i:i+2] for i in range(0, len(visible_news), 2)]
             
             for row in rows:
@@ -595,7 +598,7 @@ if not st.session_state.messages:
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
-                            st.link_button("🔗 Read Source", news['link'], use_container_width=True)
+                            st.link_button("🔗 Read", news['link'], use_container_width=True)
 
         render_news_feed()
 
@@ -605,7 +608,7 @@ if not st.session_state.messages:
         
         market_cats = fetch_categorized_markets()
         
-        # 1. Consensus Area (Green)
+        # 1. Consensus Area
         st.caption("🏛️ High Certainty (Market Consensus)")
         if market_cats['consensus']:
             for m in market_cats['consensus']:
@@ -623,7 +626,7 @@ if not st.session_state.messages:
             
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 2. Battleground Area (Yellow/Orange)
+        # 2. Battleground Area
         st.caption("⚡ Active Battleground (High Uncertainty)")
         if market_cats['battleground']:
             for m in market_cats['battleground']:
@@ -696,40 +699,32 @@ if st.session_state.messages:
         st.session_state.messages = []
         st.rerun()
 
-# ================= 🌐 6. GLOBAL NEWS FOOTER (UPDATED) =================
+# ================= 🌐 6. GLOBAL INTELLIGENCE FOOTER =================
 if not st.session_state.messages:
     st.markdown("---")
     
-    # 6.1 Twitter Trends (Mock Real-time)
+    # 6.1 Real-Time Trends (Google Trends via RSS)
     st.markdown("""
     <div style="display:flex; align-items:center; justify-content:center; margin-bottom:15px; gap:8px;">
-        <span style="font-size:1.2rem;">🐦</span>
-        <span style="font-weight:700; color:#1d9bf0; letter-spacing:1px; font-size:0.9rem;">LIVE TWITTER TRENDS</span>
+        <span style="font-size:1.2rem;">📈</span>
+        <span style="font-weight:700; color:#1d9bf0; letter-spacing:1px; font-size:0.9rem;">GLOBAL TRENDS (LIVE)</span>
     </div>
     """, unsafe_allow_html=True)
     
-    # 定义热词池
-    trend_pool = [
-        "DeepSeek", "OpenAI", "Bitcoin", "WW3", "Taiwan", "Nvidia", "SpaceX", 
-        "TikTokBan", "Powell", "Inflation", "Ethereum", "Solana", "Tesla", 
-        "Apple", "Microsoft", "Google", "China", "Russia", "Ukraine", "Gaza"
-    ]
+    real_trends = fetch_real_trends()
     
-    # 随机选取 8 个，并生成随机热度
-    current_trends = random.sample(trend_pool, 8)
     trend_html = '<div class="trend-container">'
-    for tag in current_trends:
-        vol = f"{random.randint(10, 500)}K"
-        trend_html += f'<div class="trend-tag">#{tag}<span class="trend-vol">{vol}</span></div>'
+    for t in real_trends:
+        trend_html += f'<div class="trend-tag">{t["name"]}<span class="trend-vol">{t["vol"]}</span></div>'
     trend_html += '</div>'
     
     st.markdown(trend_html, unsafe_allow_html=True)
-    
     st.markdown("<br><br>", unsafe_allow_html=True)
 
-    # 6.2 Global Intelligence Hub (Glassmorphism Cards)
+    # 6.2 Global Intelligence Hub (Safe Grid Layout)
     st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:25px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
+    # 采用更安全的原生 columns 布局，防止 HTML 结构错误
     hub_links = [
         {"name": "Jin10", "url": "https://www.jin10.com/", "icon": "🇨🇳"},
         {"name": "WallStCN", "url": "https://wallstreetcn.com/live/global", "icon": "🇨🇳"},
@@ -743,16 +738,18 @@ if not st.session_state.messages:
         {"name": "Al Jazeera", "url": "https://www.aljazeera.com/", "icon": "🇶🇦"},
     ]
     
-    # 生成 HTML 字符串，避免使用 st.markdown 多次调用导致的布局问题
-    cards_html = '<div class="hub-grid">'
-    for item in hub_links:
-        cards_html += f"""
-        <a href="{item['url']}" target="_blank" class="hub-card">
-            <div class="hub-icon">{item['icon']}</div>
-            <div class="hub-name">{item['name']}</div>
-        </a>
-        """
-    cards_html += '</div>'
+    # 使用 5 列布局，分两行渲染
+    for i in range(0, len(hub_links), 5):
+        cols = st.columns(5)
+        batch = hub_links[i:i+5]
+        for j, item in enumerate(batch):
+            with cols[j]:
+                # 使用 HTML 渲染好看的卡片按钮
+                st.markdown(f"""
+                <a href="{item['url']}" target="_blank" class="hub-btn">
+                    <span class="hub-emoji">{item['icon']}</span>
+                    <span class="hub-text">{item['name']}</span>
+                </a>
+                """, unsafe_allow_html=True)
     
-    st.markdown(cards_html, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
