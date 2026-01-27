@@ -8,14 +8,13 @@ import time
 import datetime
 import feedparser
 import random
+import urllib.parse
 
 # ================= 🔐 0. KEY MANAGEMENT =================
-# 尝试获取 API Keys
 try:
-    # 优先从 secrets 获取
     EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
-    NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", None) # 🔥 新增 NewsAPI Key
+    NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", None)
     KEYS_LOADED = True
 except:
     EXA_API_KEY = None
@@ -266,7 +265,7 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
 
-    /* Trending Tags (Red Theme) */
+    /* Trending Tags (Red Theme) - Clickable */
     .trend-container {
         display: flex;
         flex-wrap: wrap;
@@ -282,16 +281,18 @@ st.markdown("""
         border-radius: 4px;
         font-size: 0.85rem;
         font-family: 'JetBrains Mono', monospace;
-        cursor: default;
+        cursor: pointer;
         transition: all 0.3s;
         display: flex;
         align-items: center;
+        text-decoration: none; /* For anchor tag */
     }
     .trend-tag:hover {
         background: rgba(220, 38, 38, 0.2);
         border-color: #ef4444;
         box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
         transform: scale(1.05);
+        color: white;
     }
     .trend-vol {
         font-size: 0.7rem;
@@ -305,90 +306,80 @@ st.markdown("""
 
 # ================= 🧠 3. LOGIC CORE =================
 
-# --- 🔥 A. News Logic (NewsAPI Implementation) ---
-# 缓存设为 1200秒 (20分钟)，每天请求次数 ≈ 72次，完全在免费版限制内
+# --- 🔥 A. News Logic (NewsAPI + Google News Fallback) ---
+# 缓存设为 1200秒 (20分钟)
 @st.cache_data(ttl=1200) 
-def fetch_newsapi_news():
-    # 如果没有配置 Key，返回一个空的列表或者模拟数据
-    if not NEWS_API_KEY:
-        # Fallback to RSS if no key provided
-        return fetch_rss_news_fallback()
-        
-    url = f"https://newsapi.org/v2/top-headlines?country=us&category=business&pageSize=40&apiKey={NEWS_API_KEY}"
-    
+def fetch_news():
     news_items = []
-    try:
-        response = requests.get(url)
-        data = response.json()
-        
-        if data.get("status") == "ok":
-            for article in data.get("articles", []):
-                # 过滤掉已移除的文章
-                if article['title'] == "[Removed]": continue
-                
-                # 格式化数据
-                source_name = article['source']['name']
-                title = article['title']
-                link = article['url']
-                
-                # 尝试解析发布时间
-                pub_time = article.get('publishedAt', '')
-                try:
-                    dt = datetime.datetime.strptime(pub_time, "%Y-%m-%dT%H:%M:%SZ")
-                    # 转为 "2h ago" 格式
-                    diff = datetime.datetime.utcnow() - dt
-                    hours = int(diff.total_seconds() / 3600)
-                    if hours == 0:
-                        time_display = f"{int(diff.total_seconds() / 60)}m ago"
-                    else:
-                        time_display = f"{hours}h ago"
-                except:
-                    time_display = "Today"
+    
+    # 1. 尝试使用 NewsAPI (如果 Key 存在)
+    if NEWS_API_KEY:
+        try:
+            url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&pageSize=40&apiKey={NEWS_API_KEY}"
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            
+            if data.get("status") == "ok":
+                for article in data.get("articles", []):
+                    if article['title'] == "[Removed]": continue
+                    
+                    # 时间计算
+                    time_display = "LIVE"
+                    pub_time = article.get('publishedAt')
+                    if pub_time:
+                        try:
+                            dt = datetime.datetime.strptime(pub_time, "%Y-%m-%dT%H:%M:%SZ")
+                            diff = datetime.datetime.utcnow() - dt
+                            if diff.total_seconds() < 3600:
+                                time_display = f"{int(diff.total_seconds()/60)}m ago"
+                            else:
+                                time_display = f"{int(diff.total_seconds()/3600)}h ago"
+                        except: pass
 
+                    news_items.append({
+                        "title": article['title'],
+                        "source": article['source']['name'],
+                        "link": article['url'],
+                        "time": time_display
+                    })
+        except:
+            pass # Fail silently to fallback
+
+    # 2. 如果 NewsAPI 失败或没 Key，使用 Google News RSS (绝对实时)
+    if not news_items:
+        # Google News RSS (Global Business)
+        rss_url = "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWvfSkwyMHZNRGx6TVdZU0FtdHZHZ0pMVWlnQVAB?hl=en-US&gl=US&ceid=US%3Aen"
+        try:
+            feed = feedparser.parse(rss_url)
+            for entry in feed.entries[:30]:
+                # 解析时间
+                time_display = "LIVE"
+                if hasattr(entry, 'published_parsed'):
+                    try:
+                        dt = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed))
+                        diff = datetime.datetime.now() - dt
+                        if diff.total_seconds() < 3600:
+                            time_display = f"{int(diff.total_seconds()/60)}m ago"
+                        else:
+                            time_display = f"{int(diff.total_seconds()/3600)}h ago"
+                    except: pass
+                
                 news_items.append({
-                    "title": title,
-                    "source": source_name,
-                    "link": link,
+                    "title": entry.title,
+                    "source": entry.source.title if hasattr(entry, 'source') else "Google News",
+                    "link": entry.link,
                     "time": time_display
                 })
-        else:
-            # API Error fallback
-            return fetch_rss_news_fallback()
-            
-    except Exception as e:
-        print(f"NewsAPI Error: {e}")
-        return fetch_rss_news_fallback()
+        except: pass
         
-    return news_items
-
-# --- A.1 RSS Fallback (以防用户没有配 Key) ---
-def fetch_rss_news_fallback():
-    rss_urls = [
-        "https://feeds.reuters.com/reuters/businessNews",
-        "https://techcrunch.com/feed/",
-        "https://www.coindesk.com/arc/outboundfeeds/rss/"
-    ]
-    news = []
-    try:
-        for url in rss_urls:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:10]: 
-                news.append({
-                    "title": entry.title,
-                    "source": feed.feed.title if 'title' in feed.feed else "News",
-                    "link": entry.link,
-                    "time": "LIVE"
-                })
-    except: pass
-    return news[:30]
+    return news_items[:40]
 
 # --- 🔥 B. Real-Time Trends (Google Trends Fix) ---
-@st.cache_data(ttl=3600) # 1小时缓存
+@st.cache_data(ttl=3600) 
 def fetch_real_trends():
     url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
     trends = []
     
-    # 🔥 关键修复：添加 User-Agent 头，防止 Google 拦截
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
@@ -397,25 +388,16 @@ def fetch_real_trends():
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
-            for entry in feed.entries[:8]: # 取前8个
+            for entry in feed.entries[:10]: 
                 traffic = "Hot"
-                # Google Trends RSS 特有的字段 ht_approx_traffic
                 if hasattr(entry, 'ht_approx_traffic'):
                     traffic = entry.ht_approx_traffic
                 trends.append({"name": entry.title, "vol": traffic})
-    except Exception as e:
+    except:
         pass
         
-    # 如果抓取失败（空列表），使用备用静态数据，保证 UI 不崩
     if not trends:
-        trends = [
-            {"name": "Market Crash", "vol": "2M+"}, 
-            {"name": "Bitcoin", "vol": "1M+"},
-            {"name": "Nvidia Earnings", "vol": "500K+"},
-            {"name": "Election", "vol": "500K+"},
-            {"name": "Oil Price", "vol": "200K+"},
-            {"name": "Fed Rate", "vol": "200K+"}
-        ]
+        trends = [{"name": "Market", "vol": "2M+"}, {"name": "Tech", "vol": "1M+"}]
     return trends
 
 # --- C. Market Logic (Categorized) ---
@@ -655,8 +637,8 @@ if not st.session_state.messages:
             </div>
             """, unsafe_allow_html=True)
 
-            # 3. 获取新闻 (优先使用 NewsAPI)
-            all_news = fetch_newsapi_news()
+            # 3. 获取新闻 (使用升级后的 fetch_news)
+            all_news = fetch_news()
             
             # 4. 轮播逻辑
             rotation_interval = 15
@@ -841,13 +823,20 @@ if not st.session_state.messages:
     
     trend_html = '<div class="trend-container">'
     for t in real_trends:
-        trend_html += f'<div class="trend-tag">{t["name"]}<span class="trend-vol">{t["vol"]}</span></div>'
+        # 关键修复：加了 target="_blank" 和 URL 编码
+        encoded_query = urllib.parse.quote(t['name'])
+        trend_html += f"""
+        <a href="https://www.google.com/search?q={encoded_query}" target="_blank" class="trend-tag">
+            {t['name']}
+            <span class="trend-vol">{t['vol']}</span>
+        </a>
+        """
     trend_html += '</div>'
     
     st.markdown(trend_html, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
 
-    # 6.2 Global Intelligence Hub (Glassmorphism Cards)
+    # 6.2 Global Intelligence Hub
     st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:25px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
     hub_links = [
@@ -863,7 +852,7 @@ if not st.session_state.messages:
         {"name": "Al Jazeera", "url": "https://www.aljazeera.com/", "icon": "🇶🇦"},
     ]
     
-    # 使用 Streamlit 原生 Columns 循环生成，避免 HTML 结构错误
+    # 使用 Streamlit 原生 Columns 循环生成
     rows = [hub_links[i:i+5] for i in range(0, len(hub_links), 5)]
     
     for row in rows:
