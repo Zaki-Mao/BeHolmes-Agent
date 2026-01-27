@@ -321,9 +321,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= 🧠 5. LOGIC CORE (UPDATED AGENT) =================
+# ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices ---
+# --- 🔥 A. Crypto Prices (Extended List) ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices_v2():
     symbols = [
@@ -400,16 +400,32 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher ---
+# --- 🔥 C. Polymarket Fetcher (FILTERED) ---
 @st.cache_data(ttl=60)
-def fetch_polymarket_v5_simple(limit=30):
+def fetch_polymarket_v5_simple(limit=60):
     try:
-        url = "https://gamma-api.polymarket.com/events?limit=150&closed=false"
+        # Fetch more to allow for filtering
+        url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
+        
+        # 敏感词过滤 (Sensitive Keywords)
+        SENSITIVE_KEYWORDS = [
+            "china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", 
+            "hong kong", "communist", "pla", "scs", "south china sea"
+        ]
+        
         if isinstance(resp, list):
             for event in resp:
                 try:
+                    title = event.get('title', 'Untitled').strip()
+                    if not title: continue
+                    
+                    # 1. 敏感词过滤 (Case insensitive)
+                    title_lower = title.lower()
+                    if any(kw in title_lower for kw in SENSITIVE_KEYWORDS):
+                        continue
+
                     if not event.get('markets'): continue
                     m = event['markets'][0]
                     vol = float(m.get('volume', 0))
@@ -420,20 +436,19 @@ def fetch_polymarket_v5_simple(limit=30):
                     else: vol_str = f"${vol:.0f}"
                     
                     markets.append({
-                        "title": event.get('title', 'Untitled Market'),
+                        "title": title,
                         "slug": event.get('slug', ''),
                         "volume": vol,
                         "vol_str": vol_str
                     })
                 except: continue
+        
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (Search + Analysis) ---
-
+# --- 🔥 D. NEW AGENT LOGIC ---
 def generate_keywords(user_text):
-    """Generate search keywords for Polymarket"""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. Return ONLY keywords separated by spaces. Input: {user_text}"
@@ -442,15 +457,9 @@ def generate_keywords(user_text):
     except: return user_text
 
 def search_market_data(user_query):
-    """
-    Search Polymarket for a matching event.
-    Returns the top matching market object or None.
-    """
     if not EXA_AVAILABLE or not EXA_API_KEY: return None
-    
     try:
         exa = Exa(EXA_API_KEY)
-        # Search specifically on Polymarket domain
         keywords = generate_keywords(user_query)
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
@@ -458,118 +467,79 @@ def search_market_data(user_query):
             type="neural",
             include_domains=["polymarket.com"]
         )
-        
         for result in search_resp.results:
-            # Extract slug from URL
             match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
             if match:
                 slug = match.group(1)
-                # Fetch market details from Gamma API
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                 data = requests.get(api_url, timeout=5).json()
-                
                 if data and isinstance(data, list):
                     event = data[0]
                     m = event['markets'][0]
-                    # Parse outcomes/prices
                     outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
                     vol = float(m.get('volume', 0))
-                    
-                    # Format prices
                     odds_str = []
                     for i, out in enumerate(outcomes):
-                        prob = float(prices[i]) * 100
-                        odds_str.append(f"{out}: {prob:.1f}%")
-                    
+                        if i < len(prices):
+                            prob = float(prices[i]) * 100
+                            odds_str.append(f"{out}: {prob:.1f}%")
                     return {
                         "title": event['title'],
-                        "odds": " | ".join(odds_str),
+                        "odds": " | ".join(odds_str[:4]),
                         "volume": f"${vol:,.0f}",
                         "slug": slug,
-                        "url": result.url
+                        "url": f"https://polymarket.com/event/{slug}"
                     }
-    except Exception as e:
-        print(f"Market search error: {e}")
-        pass
-    
+    except: pass
     return None
 
 def analyze_with_agent(user_news, market_data):
-    """
-    Core Agent Logic.
-    Input: User News Text, Market Data (Optional)
-    Output: Professional Analysis HTML
-    """
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # Context Construction
-    if market_data:
-        market_context = f"""
-        [REAL-TIME MARKET DATA FOUND]
-        - Market: {market_data['title']}
-        - Current Odds: {market_data['odds']}
-        - Volume: {market_data['volume']}
-        - Source: Polymarket (Wisdom of the Crowds)
-        
-        INSTRUCTION: Compare the news claim against these odds. Does the market agree? 
-        If news says "X happened" but odds are low, it's FUD.
-        If odds spiked, the market confirms it.
-        """
-    else:
-        market_context = f"""
-        [NO DIRECT MARKET DATA FOUND]
-        INSTRUCTION: You must act as a senior macro strategist. 
-        Estimate the implied probability of this event being true/impactful based on historical precedents.
-        """
+    market_context = f"""
+    ✅ **REAL-TIME POLYMARKET DATA FOUND**
+    - Market: {market_data['title']}
+    - Odds: {market_data['odds']}
+    - Volume: {market_data['volume']}
+    INSTRUCTION: Compare news claim against odds.
+    """ if market_data else "❌ **NO DIRECT PREDICTION MARKET FOUND**. Rely on logical inference."
 
     system_prompt = f"""
-    You are **Be Holmes**, a top-tier Hedge Fund Analyst specializing in "Event-Driven Arbitrage".
+    You are **Be Holmes**, a top-tier Hedge Fund Analyst.
     Current Date: {current_date}
     
-    TARGET: Analyze the user's news input for truthfulness and INVESTMENT OPPORTUNITY.
+    TARGET: Analyze news input for TRUTH and INVESTMENT ALPHA.
     
     {market_context}
     
-    --- ANALYSIS REQUIREMENTS ---
+    --- ANALYSIS PROTOCOL ---
+    1. **REALITY AUDIT**: Assess source credibility and validate against Market Odds (if provided).
+    2. **SECOND-ORDER THINKING**: If true, what is the ripple effect?
+    3. **INVESTMENT TARGETS**: Identify Sectors, specific Tickers/Assets, and Direction.
     
-    1. **Reality Score (0-100)**: 
-       - Based on market data (if available) and source credibility.
-       - < 20: FUD/Fake. > 80: Confirmed Fact.
-       
-    2. **The "Alpha" Insight**:
-       - Don't just summarize. What is the *second-order* effect?
-       - Example: "If Unitree joins Spring Festival Gala" -> Robot stocks hype -> Short-term pump for robotics supply chain.
-       
-    3. **Investment Implications (Actionable)**:
-       - **Sectors to Watch**: (e.g., AI, Defense, Crypto, Energy)
-       - **Potential Tickers**: List specific stock/crypto tickers that might move (e.g., NVDA, BTC, 002352.SZ).
-       - **Direction**: [Bullish/Bearish/Neutral]
-       
-    OUTPUT FORMAT (Markdown):
+    --- OUTPUT FORMAT (Markdown) ---
+    ### 🎯 Reality Verdict: [Verdict]
+    **Probability:** [0-100]%
+    *(Justification)*
     
-    ### 🕵️‍♂️ Reality Check: [Verdict]
-    **Truth Probability:** [Score]% 
-    *(Explain why based on market data or logic)*
+    ### 🕵️‍♂️ Deep Dive
+    [Professional breakdown]
     
-    ---
-    ### 🧠 Deep Dive
-    [Your professional analysis of the event's validity and significance]
-    
-    ---
     ### 🚀 Investment Signals (Alpha)
-    * **🎯 Sectors**: [List Sectors]
-    * **📈 Bullish Watchlist**: [List Tickers/Assets]
-    * **📉 Bearish Risks**: [List Risks]
-    * **💡 Strategy**: [Short-term trade idea]
+    * **📈 Bullish / Long:**
+        * **Sectors:** [List]
+        * **Tickers:** [List] - *Why*
+    * **📉 Bearish / Short:**
+        * **Assets:** [List]
+        * **Risk:** [Brief risk]
     """
     
     messages = [
         {"role": "user", "parts": [system_prompt]},
         {"role": "user", "parts": [f"News Input: {user_news}"]}
     ]
-    
     try:
         response = model.generate_content(messages)
         return response.text
@@ -591,14 +561,12 @@ with s_mid:
     if st.button("⚖️ Reality Check", use_container_width=True):
         if user_query:
             st.session_state.is_processing = True
-            st.session_state.messages = [] # Clear previous
+            st.session_state.messages = [] 
             
-            # 1. Agent Search Step
             with st.spinner("🕵️‍♂️ Searching Prediction Markets..."):
                 market_data = search_market_data(user_query)
                 st.session_state.current_market = market_data
             
-            # 2. Agent Analysis Step
             with st.spinner("🧠 Generating Alpha Signals..."):
                 analysis_text = analyze_with_agent(user_query, market_data)
                 st.session_state.messages.append({"role": "assistant", "content": analysis_text})
@@ -620,7 +588,6 @@ if not st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-        # Global Trends Buttons
         trend_html = """
         <div class="trend-row">
             <a href="https://trends.google.com/trending?geo=US" target="_blank" class="trend-fixed-btn">📈 Google Trends</a>
@@ -632,7 +599,6 @@ if not st.session_state.messages:
         """
         st.markdown(trend_html, unsafe_allow_html=True)
 
-        # Category Tabs
         cat_cols = st.columns(4)
         cats = ["all", "politics", "web3", "tech"]
         labels = {"all": "🌐 All", "politics": "🏛️ Politics", "web3": "₿ Web3", "tech": "🤖 Tech"}
@@ -641,7 +607,6 @@ if not st.session_state.messages:
                 st.session_state.news_category = c
                 st.rerun()
 
-        # Render Feed
         @st.fragment(run_every=1)
         def render_news_feed():
             now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -702,7 +667,7 @@ if not st.session_state.messages:
                     st.info("No news available.")
         render_news_feed()
 
-    # === RIGHT: Polymarket ===
+    # === RIGHT: Polymarket (Top Volume Only + Filtered) ===
     with col_markets:
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
@@ -710,7 +675,9 @@ if not st.session_state.messages:
         if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
         if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
         
-        markets = fetch_polymarket_v5_simple(30)
+        # 🔥 UPDATED: Request 60 items
+        markets = fetch_polymarket_v5_simple(60)
+        
         if markets:
             rows = [markets[i:i+2] for i in range(0, len(markets), 2)]
             for row in rows:
@@ -730,10 +697,8 @@ if not st.session_state.messages:
             st.info("Loading markets...")
 
 else:
-    # === ANALYSIS RESULT ===
+    # Analysis View
     st.markdown("---")
-    
-    # 1. Market Data Card (If Found)
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -754,7 +719,6 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-    # 2. AI Analysis
     for msg in st.session_state.messages:
         if msg['role'] == 'assistant':
             st.markdown(f"<div class='analysis-card'>{msg['content']}</div>", unsafe_allow_html=True)
