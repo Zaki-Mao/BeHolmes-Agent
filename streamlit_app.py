@@ -8,6 +8,7 @@ import time
 import datetime
 import feedparser
 import urllib.parse
+import html
 
 # ================= 🔐 0. KEY MANAGEMENT =================
 try:
@@ -22,14 +23,13 @@ except:
     KEYS_LOADED = False
 
 if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-
-# ================= 🛠️ DEPENDENCY CHECK =================
-try:
-    from exa_py import Exa
-    EXA_AVAILABLE = True
-except ImportError:
-    EXA_AVAILABLE = False
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        GEMINI_AVAILABLE = True
+    except:
+        GEMINI_AVAILABLE = False
+else:
+    GEMINI_AVAILABLE = False
 
 # ================= 🕵️‍♂️ 1. SYSTEM CONFIGURATION =================
 st.set_page_config(
@@ -44,20 +44,22 @@ if "news_category" not in st.session_state:
     st.session_state.news_category = "All"
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
 
-# ================= 🎨 2. UI THEME (CRIMSON/DARK MODE) =================
+# ================= 🎨 2. UI THEME (修复乱码) =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=JetBrains+Mono:wght@400;700&display=swap');
 
     /* Global Background */
     .stApp {
-        background-image: linear-gradient(rgba(0, 0, 0, 0.92), rgba(20, 0, 0, 0.98)), 
-                          url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
+        background-image: linear-gradient(rgba(0, 0, 0, 0.92), rgba(20, 0, 0, 0.98));
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
         font-family: 'Inter', sans-serif;
+        color: white;
     }
     
     /* Headers */
@@ -71,6 +73,15 @@ st.markdown("""
         text-shadow: 0 0 40px rgba(220, 38, 38, 0.8);
         margin-top: 20px;
     }
+    
+    .hero-subtitle {
+        text-align: center;
+        color: #9ca3af;
+        font-size: 1rem;
+        margin-bottom: 30px;
+        letter-spacing: 3px;
+    }
+    
     .section-header {
         font-size: 0.85rem;
         font-weight: 700;
@@ -92,6 +103,7 @@ st.markdown("""
         gap: 10px;
         margin-bottom: 20px;
     }
+    
     .trend-tag {
         padding: 5px 12px;
         border-radius: 4px;
@@ -104,11 +116,31 @@ st.markdown("""
         align-items: center;
         gap: 6px;
     }
-    .trend-tag:hover { transform: scale(1.05); box-shadow: 0 0 10px rgba(255,255,255,0.2); }
-    .t-grad-1 { background: linear-gradient(135deg, #ef4444, #b91c1c); } /* Red */
-    .t-grad-2 { background: linear-gradient(135deg, #ec4899, #be185d); } /* Pink */
-    .t-grad-3 { background: linear-gradient(135deg, #8b5cf6, #6d28d9); } /* Purple */
-    .trend-vol { font-size: 0.65rem; opacity: 0.8; background: rgba(0,0,0,0.3); padding: 1px 4px; border-radius: 3px; }
+    
+    .trend-tag:hover { 
+        transform: scale(1.05); 
+        box-shadow: 0 0 10px rgba(255,255,255,0.2); 
+    }
+    
+    .t-grad-1 { 
+        background: linear-gradient(135deg, #ef4444, #b91c1c); 
+    }
+    
+    .t-grad-2 { 
+        background: linear-gradient(135deg, #ec4899, #be185d); 
+    }
+    
+    .t-grad-3 { 
+        background: linear-gradient(135deg, #8b5cf6, #6d28d9); 
+    }
+    
+    .trend-vol { 
+        font-size: 0.65rem; 
+        opacity: 0.8; 
+        background: rgba(0,0,0,0.3); 
+        padding: 1px 4px; 
+        border-radius: 3px; 
+    }
 
     /* 📰 News Cards */
     .news-card {
@@ -123,12 +155,27 @@ st.markdown("""
         justify-content: space-between;
         transition: all 0.3s;
     }
+    
     .news-card:hover {
         background: rgba(255, 255, 255, 0.06);
         border-left-color: #ef4444;
     }
-    .news-meta { font-size: 0.7rem; color: #9ca3af; display: flex; justify-content: space-between; margin-bottom: 6px; }
-    .news-title { font-size: 0.9rem; font-weight: 500; color: #e5e7eb; line-height: 1.4; }
+    
+    .news-meta { 
+        font-size: 0.7rem; 
+        color: #9ca3af; 
+        display: flex; 
+        justify-content: space-between; 
+        margin-bottom: 6px; 
+    }
+    
+    .news-title { 
+        font-size: 0.9rem; 
+        font-weight: 500; 
+        color: #e5e7eb; 
+        line-height: 1.4; 
+    }
+    
     .news-link-btn {
         display: block;
         margin-top: 10px;
@@ -138,7 +185,11 @@ st.markdown("""
         text-decoration: none;
         font-weight: 600;
     }
-    .news-link-btn:hover { text-decoration: underline; color: #fca5a5; }
+    
+    .news-link-btn:hover { 
+        text-decoration: underline; 
+        color: #fca5a5; 
+    }
 
     /* 💰 Polymarket Cards (Compact) */
     .poly-card {
@@ -146,14 +197,16 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         padding: 12px;
-        margin-bottom: 0px; /* Managed by grid */
+        margin-bottom: 0px;
         height: 100%;
         transition: all 0.2s;
     }
+    
     .poly-card:hover {
         border-color: #ef4444;
         background: rgba(40, 10, 10, 0.4);
     }
+    
     .poly-head {
         display: flex;
         justify-content: space-between;
@@ -161,18 +214,20 @@ st.markdown("""
         font-size: 0.7rem;
         color: #6b7280;
     }
+    
     .poly-title {
         font-size: 0.85rem;
         font-weight: 600;
         color: #f3f4f6;
         line-height: 1.3;
         margin-bottom: 12px;
-        height: 2.6em; /* Fixed height for 2 lines */
+        height: 2.6em;
         overflow: hidden;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
     }
+    
     .poly-bar {
         display: flex;
         height: 24px;
@@ -182,6 +237,7 @@ st.markdown("""
         font-size: 0.75rem;
         font-weight: 700;
     }
+    
     .bar-yes {
         background: rgba(16, 185, 129, 0.2);
         color: #34d399;
@@ -190,6 +246,7 @@ st.markdown("""
         padding-left: 6px;
         border-right: 1px solid rgba(0,0,0,0.5);
     }
+    
     .bar-no {
         background: rgba(239, 68, 68, 0.2);
         color: #f87171;
@@ -200,8 +257,34 @@ st.markdown("""
         flex-grow: 1;
     }
     
+    /* Analysis Results */
+    .analysis-box {
+        background: rgba(0, 0, 0, 0.5);
+        border-left: 3px solid #ef4444;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+    
+    .analysis-header {
+        color: #ef4444;
+        font-weight: 700;
+        font-size: 1rem;
+        margin-bottom: 10px;
+    }
+    
+    .analysis-content {
+        color: #e5e7eb;
+        line-height: 1.6;
+    }
+    
     /* Footer Hub */
-    .hub-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .hub-grid { 
+        display: grid; 
+        grid-template-columns: repeat(5, 1fr); 
+        gap: 10px; 
+    }
+    
     .hub-btn {
         background: rgba(255,255,255,0.03);
         border: 1px solid rgba(255,255,255,0.05);
@@ -215,25 +298,54 @@ st.markdown("""
         flex-direction: column;
         align-items: center;
     }
+    
     .hub-btn:hover {
         background: rgba(255,255,255,0.08);
         border-color: #ef4444;
         color: white !important;
         transform: translateY(-2px);
     }
-    .hub-emoji { font-size: 1.2rem; margin-bottom: 4px; }
-    .hub-text { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+    
+    .hub-emoji { 
+        font-size: 1.2rem; 
+        margin-bottom: 4px; 
+    }
+    
+    .hub-text { 
+        font-size: 0.7rem; 
+        font-weight: 600; 
+        text-transform: uppercase; 
+    }
 
     /* Input & Button Overrides */
-    .stTextArea textarea { background: rgba(0,0,0,0.5) !important; border: 1px solid #333 !important; color: white !important; }
-    .stTextArea textarea:focus { border-color: #ef4444 !important; }
+    .stTextArea textarea { 
+        background: rgba(0,0,0,0.5) !important; 
+        border: 1px solid #333 !important; 
+        color: white !important; 
+    }
+    
+    .stTextArea textarea:focus { 
+        border-color: #ef4444 !important; 
+    }
+    
     div.stButton > button {
         background: #b91c1c !important;
         color: white !important;
         border: none !important;
         width: 100%;
     }
-    div.stButton > button:hover { background: #dc2626 !important; }
+    
+    div.stButton > button:hover { 
+        background: #dc2626 !important; 
+    }
+    
+    /* Chat messages */
+    .stChatMessage {
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -244,8 +356,9 @@ st.markdown("""
 def fetch_google_trends():
     url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
     trends = []
-    # User-Agent is crucial for Google
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
     try:
         resp = requests.get(url, headers=headers, timeout=5)
@@ -255,23 +368,32 @@ def fetch_google_trends():
                 traffic = "Hot"
                 if hasattr(entry, 'ht_approx_traffic'):
                     traffic = entry.ht_approx_traffic
-                trends.append({"name": entry.title, "vol": traffic})
-    except: pass
+                # 清理标题，移除HTML实体
+                title = html.unescape(entry.title)
+                trends.append({"name": title, "vol": traffic})
+    except Exception as e:
+        st.error(f"Google Trends error: {e}")
     
-    # Fallback if empty (prevent UI break)
+    # Fallback if empty
     if not trends:
-        trends = [{"name": "Bitcoin", "vol": "500K+"}, {"name": "AI", "vol": "200K+"}, {"name": "Nvidia", "vol": "100K+"}]
+        trends = [
+            {"name": "Bitcoin", "vol": "500K+"},
+            {"name": "AI", "vol": "200K+"},
+            {"name": "Nvidia", "vol": "100K+"},
+            {"name": "Ethereum", "vol": "80K+"},
+            {"name": "Trump", "vol": "150K+"},
+            {"name": "Election", "vol": "120K+"}
+        ]
     return trends
 
 # --- 🔥 B. News Fetcher (Category + Time Filter) ---
-@st.cache_data(ttl=900) # 15 min cache
+@st.cache_data(ttl=900)
 def fetch_news_by_category(category):
     news_items = []
     
-    # 1. Build Query params based on Category
     params = {
         "language": "en",
-        "pageSize": 60, # Fetch more to allow for filtering
+        "pageSize": 60,
         "apiKey": NEWS_API_KEY
     }
     
@@ -280,30 +402,28 @@ def fetch_news_by_category(category):
         params["q"] = "crypto OR bitcoin OR ethereum OR blockchain"
         params["sortBy"] = "publishedAt"
     elif category == "Politics":
-        url = "https://newsapi.org/v2/top-headlines"
-        params["category"] = "politics" # Sometimes works, otherwise use q
-        params["country"] = "us"
+        url = "https://newsapi.org/v2/everything"
+        params["q"] = "politics OR election OR government"
+        params["sortBy"] = "publishedAt"
     elif category == "Tech":
+        url = "https://newsapi.org/v2/everything"
+        params["q"] = "technology OR AI OR software"
+        params["sortBy"] = "publishedAt"
+    else:
         url = "https://newsapi.org/v2/top-headlines"
-        params["category"] = "technology"
-    else: # All / General
-        url = "https://newsapi.org/v2/top-headlines"
-        params["category"] = "general"
+        params["country"] = "us"
 
-    # 2. Try NewsAPI First
     if NEWS_API_KEY:
         try:
-            resp = requests.get(url, params=params, timeout=5)
+            resp = requests.get(url, params=params, timeout=10)
             data = resp.json()
             if data.get("status") == "ok":
                 for art in data.get("articles", []):
-                    # Filter [Removed]
-                    if art['title'] == "[Removed]": continue
+                    if art['title'] == "[Removed]" or not art['title']:
+                        continue
                     
-                    # 🔥 Strict 24h Filter
                     pub_str = art.get("publishedAt")
-                    time_ago = "Just now"
-                    is_recent = True
+                    time_ago = "Recent"
                     
                     if pub_str:
                         try:
@@ -312,88 +432,162 @@ def fetch_news_by_category(category):
                             diff = now_dt - pub_dt
                             hours = diff.total_seconds() / 3600
                             
-                            if hours > 24: 
-                                is_recent = False # Skip old news
+                            if hours > 24:
+                                continue
                             elif hours < 1:
                                 time_ago = f"{int(diff.total_seconds()/60)}m ago"
                             else:
                                 time_ago = f"{int(hours)}h ago"
-                        except: pass
+                        except:
+                            pass
                     
-                    if is_recent:
-                        news_items.append({
-                            "title": art['title'],
-                            "source": art['source']['name'],
-                            "link": art['url'],
-                            "time": time_ago
-                        })
-        except: pass
+                    # 清理HTML实体
+                    title = html.unescape(art['title'])
+                    news_items.append({
+                        "title": title,
+                        "source": art['source']['name'],
+                        "link": art['url'],
+                        "time": time_ago
+                    })
+        except Exception as e:
+            st.error(f"News API error: {e}")
 
-    # 3. Fallback to RSS if list is empty (e.g. API limit reached)
+    # Fallback to RSS
     if not news_items:
         rss_map = {
-            "Web3": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+            "Web3": "https://cointelegraph.com/rss",
             "Tech": "https://techcrunch.com/feed/",
-            "Politics": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
-            "All": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+            "Politics": "https://feeds.bbci.co.uk/news/politics/rss.xml",
+            "All": "http://feeds.bbci.co.uk/news/rss.xml"
         }
         try:
-            feed = feedparser.parse(rss_map.get(category, rss_map["All"]))
+            feed_url = rss_map.get(category, rss_map["All"])
+            feed = feedparser.parse(feed_url)
             for entry in feed.entries[:20]:
+                title = html.unescape(entry.title)
                 news_items.append({
-                    "title": entry.title,
-                    "source": entry.get("source", {}).get("title", "RSS"),
+                    "title": title,
+                    "source": entry.get("source", {}).get("title", "RSS Feed"),
                     "link": entry.link,
                     "time": "Recent"
                 })
-        except: pass
-        
+        except Exception as e:
+            st.error(f"RSS error: {e}")
+            
     return news_items[:20]
 
-# --- 🔥 C. Polymarket Global Top Volume ---
+# --- 🔥 C. Polymarket Global Top Volume (修复API) ---
 @st.cache_data(ttl=60)
 def fetch_top_polymarkets():
-    # Fetch global top events by volume
-    url = "https://gamma-api.polymarket.com/events?limit=20&sort=volume&order=desc&closed=false"
+    # 使用新的API端点
+    url = "https://strapi-matic.poly.market/markets?limit=20&sort=volume24h:desc"
     markets = []
     
     try:
-        resp = requests.get(url, timeout=5).json()
-        if isinstance(resp, list):
-            for event in resp:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            for item in data.get("data", []):
                 try:
-                    # Get the main market (usually the first one)
-                    m = event.get('markets', [])[0]
-                    vol = float(m.get('volume', 0))
+                    attributes = item.get("attributes", {})
+                    title = attributes.get("question", "")
                     
-                    # Decode prices
-                    outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-                    prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+                    # 获取交易量
+                    volume_24h = attributes.get("volume24h", 0)
+                    if isinstance(volume_24h, str):
+                        volume_24h = float(volume_24h)
                     
-                    # Only handle Binary (Yes/No) for clean UI
-                    if len(outcomes) == 2 and len(prices) == 2:
-                        yes_price = float(prices[0]) * 100
-                        no_price = float(prices[1]) * 100
+                    # 格式化交易量
+                    if volume_24h > 1000000:
+                        vol_str = f"${volume_24h/1000000:.1f}M"
+                    elif volume_24h > 1000:
+                        vol_str = f"${volume_24h/1000:.0f}K"
+                    else:
+                        vol_str = f"${volume_24h:.0f}"
+                    
+                    # 获取价格数据
+                    outcomes = attributes.get("outcomes", [])
+                    if len(outcomes) >= 2:
+                        yes_price = outcomes[0].get("price", 50) * 100
+                        no_price = outcomes[1].get("price", 50) * 100
                         
-                        # Format Volume ($10M, $500K)
-                        if vol > 1000000: vol_str = f"${vol/1000000:.1f}M"
-                        elif vol > 1000: vol_str = f"${vol/1000:.0f}K"
-                        else: vol_str = f"${vol:.0f}"
-
+                        # 确保价格是整数且合理
+                        yes_price = int(max(0, min(100, yes_price)))
+                        no_price = int(max(0, min(100, 100 - yes_price)))
+                        
                         markets.append({
-                            "title": event.get('title'),
+                            "title": html.unescape(title),
                             "vol_str": vol_str,
-                            "vol_raw": vol,
-                            "yes": int(yes_price),
-                            "no": int(no_price),
-                            "slug": event.get('slug')
+                            "vol_raw": volume_24h,
+                            "yes": yes_price,
+                            "no": no_price,
+                            "slug": attributes.get("slug", "")
                         })
-                except: continue
-    except: pass
+                except Exception as e:
+                    continue
+    except Exception as e:
+        st.error(f"Polymarket API error: {e}")
     
-    # Sort by Volume strictly descending
+    # 按交易量排序
     markets.sort(key=lambda x: x['vol_raw'], reverse=True)
-    return markets
+    return markets[:10]
+
+# --- 🔥 D. AI 分析推理功能 ---
+def analyze_with_gemini(news_text, polymarket_data):
+    """使用Gemini AI分析新闻和Polymarket数据"""
+    if not GEMINI_AVAILABLE or not GOOGLE_API_KEY:
+        return "⚠️ Gemini API不可用。请检查API密钥配置。"
+    
+    try:
+        # 配置安全设置
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+        
+        # 准备Polymarket数据摘要
+        poly_summary = ""
+        if polymarket_data:
+            poly_summary = "相关预测市场数据：\n"
+            for market in polymarket_data[:5]:
+                poly_summary += f"- {market['title']}: Yes {market['yes']}% | No {market['no']}% | 交易量: {market['vol_str']}\n"
+        
+        # 构造提示词
+        prompt = f"""
+        你是一个专业的市场分析师和新闻事实核查员。请分析以下新闻内容，并结合预测市场数据进行推理分析。
+        
+        新闻内容：{news_text}
+        
+        {poly_summary}
+        
+        请从以下角度进行分析：
+        1. 事实核查：这条新闻的可信度如何？是否有已知的事实错误或偏见？
+        2. 市场影响：这条新闻对相关市场（加密货币、股票、政治等）可能产生什么影响？
+        3. 预测市场验证：预测市场的赔率如何反映市场对这条新闻的看法？
+        4. 推演分析：基于这条新闻，未来24-72小时可能发生什么？
+        5. 建议：投资者或关注者应该注意什么？
+        
+        请用中文回答，保持专业、客观。
+        """
+        
+        # 调用Gemini API
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(
+            prompt,
+            safety_settings=safety_settings,
+            generation_config={
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 2048,
+            }
+        )
+        
+        return response.text
+    except Exception as e:
+        return f"分析过程中出现错误：{str(e)}"
 
 # ================= 🖥️ 4. MAIN LAYOUT =================
 
@@ -405,9 +599,44 @@ st.markdown('<div class="hero-subtitle">Narrative vs. Reality Engine</div>', uns
 _, s_col, _ = st.columns([1, 6, 1])
 with s_col:
     user_query = st.text_area("Analyze News", height=70, placeholder="Paste a headline to check reality...", label_visibility="collapsed")
-    if st.button("⚖️ REALITY CHECK"):
-        # (保持原有的 AI 分析逻辑，此处省略以节省篇幅，重点在 UI 更新)
-        pass
+    
+    if st.button("⚖️ REALITY CHECK", key="reality_check"):
+        if user_query:
+            with st.spinner("🔍 Holmes正在分析中..."):
+                # 获取当前Polymarket数据
+                polymarket_data = fetch_top_polymarkets()
+                
+                # 使用AI进行分析
+                analysis_result = analyze_with_gemini(user_query, polymarket_data)
+                
+                # 保存结果到session state
+                st.session_state.analysis_result = analysis_result
+                st.session_state.messages.append({
+                    "role": "user", 
+                    "content": user_query
+                })
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": analysis_result
+                })
+                
+                # 显示成功消息
+                st.success("✅ 分析完成！")
+        else:
+            st.warning("请输入要分析的新闻内容")
+
+# --- 显示分析结果 ---
+if st.session_state.analysis_result:
+    st.markdown('<div class="analysis-box">', unsafe_allow_html=True)
+    st.markdown('<div class="analysis-header">🕵️‍♂️ HOLMES 分析报告</div>', unsafe_allow_html=True)
+    st.markdown(st.session_state.analysis_result)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# --- 显示聊天历史 ---
+if st.session_state.messages:
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -443,33 +672,36 @@ with col_left:
         st.markdown('<div class="section-header" style="margin-bottom:0;">📡 GLOBAL WIRE (24H)</div>', unsafe_allow_html=True)
     with c2:
         # Category Filter Pills
-        cat = st.radio("Category", ["All", "Web3", "Tech", "Politics"], horizontal=True, label_visibility="collapsed")
+        cat = st.radio("Category", ["All", "Web3", "Tech", "Politics"], 
+                      horizontal=True, 
+                      label_visibility="collapsed",
+                      key="news_filter")
         if cat != st.session_state.news_category:
             st.session_state.news_category = cat
-            # st.rerun() # Optional: rerun to refresh immediately
 
     # 3. News Grid (Dual Column)
     news_items = fetch_news_by_category(st.session_state.news_category)
     
     if not news_items:
-        st.info("Scanning frequencies...")
+        st.info("📡 Scanning frequencies...")
     else:
         # Create 2-column layout for news cards
         for i in range(0, len(news_items), 2):
             row_cols = st.columns(2)
             # Card 1
-            with row_cols[0]:
-                item = news_items[i]
-                st.markdown(f"""
-                <div class="news-card">
-                    <div class="news-meta">
-                        <span>{item['source']}</span>
-                        <span style="color:#ef4444">{item['time']}</span>
+            if i < len(news_items):
+                with row_cols[0]:
+                    item = news_items[i]
+                    st.markdown(f"""
+                    <div class="news-card">
+                        <div class="news-meta">
+                            <span>{item['source']}</span>
+                            <span style="color:#ef4444">{item['time']}</span>
+                        </div>
+                        <div class="news-title">{item['title']}</div>
+                        <a href="{item['link']}" target="_blank" class="news-link-btn">🔗 READ SOURCE</a>
                     </div>
-                    <div class="news-title">{item['title']}</div>
-                    <a href="{item['link']}" target="_blank" class="news-link-btn">🔗 READ SOURCE</a>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
             
             # Card 2 (if exists)
             if i + 1 < len(news_items):
@@ -495,37 +727,23 @@ with col_right:
     top_markets = fetch_top_polymarkets()
     
     if not top_markets:
-        st.info("Connecting to Polymarket...")
+        st.info("🔌 Connecting to Polymarket...")
     else:
         # Create 2-column layout for markets
         for i in range(0, len(top_markets), 2):
             m_cols = st.columns(2)
             
             # Left Market Card
-            with m_cols[0]:
-                m = top_markets[i]
-                st.markdown(f"""
-                <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                    <div class="poly-card">
-                        <div class="poly-head">
-                            <span>🔥 HOT</span>
-                            <span style="color:#e5e7eb; font-weight:bold;">Vol: {m['vol_str']}</span>
-                        </div>
-                        <div class="poly-title">{m['title']}</div>
-                        <div class="poly-bar">
-                            <div class="bar-yes" style="width:{m['yes']}%">Yes {m['yes']}</div>
-                            <div class="bar-no" style="width:{m['no']}%">{m['no']} No</div>
-                        </div>
-                    </div>
-                </a>
-                """, unsafe_allow_html=True)
-                
-            # Right Market Card (if exists)
-            if i + 1 < len(top_markets):
-                with m_cols[1]:
-                    m = top_markets[i+1]
+            if i < len(top_markets):
+                with m_cols[0]:
+                    m = top_markets[i]
+                    # 清理URL
+                    slug = m.get('slug', '')
+                    if not slug.startswith('https://'):
+                        slug = f"https://polymarket.com/event/{slug}"
+                    
                     st.markdown(f"""
-                    <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
+                    <a href="{slug}" target="_blank" style="text-decoration:none;">
                         <div class="poly-card">
                             <div class="poly-head">
                                 <span>🔥 HOT</span>
@@ -533,8 +751,32 @@ with col_right:
                             </div>
                             <div class="poly-title">{m['title']}</div>
                             <div class="poly-bar">
-                                <div class="bar-yes" style="width:{m['yes']}%">Yes {m['yes']}</div>
-                                <div class="bar-no" style="width:{m['no']}%">{m['no']} No</div>
+                                <div class="bar-yes" style="width:{m['yes']}%">Yes {m['yes']}%</div>
+                                <div class="bar-no" style="width:{m['no']}%">{m['no']}% No</div>
+                            </div>
+                        </div>
+                    </a>
+                    """, unsafe_allow_html=True)
+                
+            # Right Market Card (if exists)
+            if i + 1 < len(top_markets):
+                with m_cols[1]:
+                    m = top_markets[i+1]
+                    slug = m.get('slug', '')
+                    if not slug.startswith('https://'):
+                        slug = f"https://polymarket.com/event/{slug}"
+                    
+                    st.markdown(f"""
+                    <a href="{slug}" target="_blank" style="text-decoration:none;">
+                        <div class="poly-card">
+                            <div class="poly-head">
+                                <span>🔥 HOT</span>
+                                <span style="color:#e5e7eb; font-weight:bold;">Vol: {m['vol_str']}</span>
+                            </div>
+                            <div class="poly-title">{m['title']}</div>
+                            <div class="poly-bar">
+                                <div class="bar-yes" style="width:{m['yes']}%">Yes {m['yes']}%</div>
+                                <div class="bar-no" style="width:{m['no']}%">{m['no']}% No</div>
                             </div>
                         </div>
                     </a>
