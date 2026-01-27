@@ -405,6 +405,54 @@ def fetch_categorized_news_v2():
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
 # --- 🔥 C. Polymarket Fetcher (FILTERED & EXPANDED) ---
+# 统一的Polymarket数据处理逻辑
+def process_polymarket_event(event):
+    """处理单个Polymarket事件，返回标准化数据结构"""
+    try:
+        title = event.get('title', 'Untitled').strip()
+        if not title: return None
+        
+        # 敏感词过滤
+        SENSITIVE_KEYWORDS = ["china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", "hong kong", "communist"]
+        if any(kw in title.lower() for kw in SENSITIVE_KEYWORDS): return None
+
+        # 状态过滤
+        if event.get('closed') is True: return None
+        if not event.get('markets'): return None
+        
+        m = event['markets'][0] # 主市场
+        vol = float(m.get('volume', 0))
+        if vol < 1000: return None # 过滤死盘
+        
+        if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
+        elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
+        else: vol_str = f"${vol:.0f}"
+
+        # 解析赔率（兼容多选项）
+        outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+        prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
+        
+        outcome_data = []
+        for i, out in enumerate(outcomes):
+            if i < len(prices):
+                prob = float(prices[i]) * 100
+                outcome_data.append((out, prob))
+        
+        # 按概率降序
+        outcome_data.sort(key=lambda x: x[1], reverse=True)
+        top_odds = [f"{o}: {p:.1f}%" for o, p in outcome_data[:3]]
+        odds_str = " | ".join(top_odds)
+
+        return {
+            "title": title,
+            "slug": event.get('slug', ''),
+            "volume": vol,
+            "vol_str": vol_str,
+            "odds": odds_str,
+            "url": f"https://polymarket.com/event/{event.get('slug', '')}"
+        }
+    except: return None
+
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
     try:
@@ -412,44 +460,17 @@ def fetch_polymarket_v5_simple(limit=60):
         resp = requests.get(url, timeout=8).json()
         markets = []
         
-        SENSITIVE_KEYWORDS = [
-            "china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", 
-            "hong kong", "communist", "pla", "scs", "south china sea"
-        ]
-        
         if isinstance(resp, list):
             for event in resp:
-                try:
-                    title = event.get('title', 'Untitled').strip()
-                    if not title: continue
-                    
-                    title_lower = title.lower()
-                    if any(kw in title_lower for kw in SENSITIVE_KEYWORDS):
-                        continue
-
-                    if event.get('closed') is True: continue
-                    if not event.get('markets'): continue
-                    m = event['markets'][0]
-                    vol = float(m.get('volume', 0))
-                    if vol < 1000: continue
-                    
-                    if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
-                    elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
-                    else: vol_str = f"${vol:.0f}"
-                    
-                    markets.append({
-                        "title": title,
-                        "slug": event.get('slug', ''),
-                        "volume": vol,
-                        "vol_str": vol_str
-                    })
-                except: continue
+                market_data = process_polymarket_event(event)
+                if market_data:
+                    markets.append(market_data)
         
         markets.sort(key=lambda x: x['volume'], reverse=True)
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (Dual Engine: Arb Trader vs Macro Strategist) ---
+# --- 🔥 D. NEW AGENT LOGIC (Unified Search + Deep Analysis) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -458,469 +479,156 @@ def generate_keywords(user_text):
         return resp.text.strip()
     except: return user_text
 
-def fetch_market_by_slug(slug):
-    """通过slug获取市场数据，包含所有子市场"""
-    try:
-        api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-        data = requests.get(api_url, timeout=5).json()
-        if data and isinstance(data, list):
-            event = data[0]
-            
-            # 过滤敏感话题
-            if any(kw in event['title'].lower() for kw in ["china", "xi jinping", "taiwan"]): 
-                return None
-
-            # 收集所有子市场
-            all_markets = []
-            total_volume = 0
-            
-            for m in event.get('markets', []):
-                outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-                prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-                vol = float(m.get('volume', 0))
-                total_volume += vol
-                
-                # 如果是二元市场（Yes/No）
-                if len(outcomes) == 2 and 'Yes' in outcomes and 'No' in outcomes:
-                    yes_idx = outcomes.index('Yes')
-                    no_idx = outcomes.index('No')
-                    market_info = {
-                        "question": m.get('question', event['title']),
-                        "type": "binary",
-                        "yes_price": float(prices[yes_idx]) * 100 if yes_idx < len(prices) else 0,
-                        "no_price": float(prices[no_idx]) * 100 if no_idx < len(prices) else 0,
-                        "volume": vol
-                    }
-                # 如果是多选市场
-                else:
-                    options = []
-                    for i, out in enumerate(outcomes):
-                        if i < len(prices):
-                            options.append({
-                                "option": out,
-                                "price": float(prices[i]) * 100
-                            })
-                    market_info = {
-                        "question": m.get('question', event['title']),
-                        "type": "multiple",
-                        "options": options,
-                        "volume": vol
-                    }
-                
-                all_markets.append(market_info)
-            
-            # 生成简化的odds字符串用于列表显示
-            if all_markets:
-                first_market = all_markets[0]
-                if first_market['type'] == 'binary':
-                    odds_display = f"Yes: {first_market['yes_price']:.1f}% | No: {first_market['no_price']:.1f}%"
-                else:
-                    top_options = sorted(first_market['options'], key=lambda x: x['price'], reverse=True)[:3]
-                    odds_display = " | ".join([f"{opt['option']}: {opt['price']:.1f}%" for opt in top_options])
-            else:
-                odds_display = "No data"
-            
-            return {
-                "title": event['title'],
-                "odds": odds_display,
-                "volume": f"${total_volume:,.0f}",
-                "slug": slug,
-                "url": f"https://polymarket.com/event/{slug}",
-                "markets": all_markets,  # 包含所有子市场的详细信息
-                "total_volume": total_volume
-            }
-    except:
-        return None
-
-def search_markets_by_api(user_query):
-    """通过Polymarket API直接搜索相关市场"""
-    candidates = []
-    try:
-        # 提取关键词
-        keywords = generate_keywords(user_query).lower().split()
-        
-        # 获取活跃市场
-        url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
-        resp = requests.get(url, timeout=8).json()
-        
-        if isinstance(resp, list):
-            for event in resp:
-                try:
-                    title = event.get('title', '').strip()
-                    if not title: continue
-                    
-                    title_lower = title.lower()
-                    
-                    # 过滤敏感话题
-                    if any(kw in title_lower for kw in ["china", "chinese", "xi jinping", "taiwan", "ccp"]): 
-                        continue
-                    
-                    # 关键词匹配度评分
-                    match_score = sum(1 for kw in keywords if kw in title_lower)
-                    if match_score == 0: continue
-                    
-                    if event.get('closed') is True: continue
-                    if not event.get('markets'): continue
-                    
-                    # 收集所有子市场
-                    all_markets = []
-                    total_volume = 0
-                    
-                    for m in event.get('markets', []):
-                        outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
-                        prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
-                        vol = float(m.get('volume', 0))
-                        total_volume += vol
-                        
-                        # 如果是二元市场（Yes/No）
-                        if len(outcomes) == 2 and 'Yes' in outcomes and 'No' in outcomes:
-                            yes_idx = outcomes.index('Yes')
-                            no_idx = outcomes.index('No')
-                            market_info = {
-                                "question": m.get('question', event['title']),
-                                "type": "binary",
-                                "yes_price": float(prices[yes_idx]) * 100 if yes_idx < len(prices) else 0,
-                                "no_price": float(prices[no_idx]) * 100 if no_idx < len(prices) else 0,
-                                "volume": vol
-                            }
-                        # 如果是多选市场
-                        else:
-                            options = []
-                            for i, out in enumerate(outcomes):
-                                if i < len(prices):
-                                    options.append({
-                                        "option": out,
-                                        "price": float(prices[i]) * 100
-                                    })
-                            market_info = {
-                                "question": m.get('question', event['title']),
-                                "type": "multiple",
-                                "options": options,
-                                "volume": vol
-                            }
-                        
-                        all_markets.append(market_info)
-                    
-                    # 降低音量要求以获取更多结果
-                    if total_volume < 100: continue
-                    
-                    # 生成简化的odds字符串用于列表显示
-                    if all_markets:
-                        first_market = all_markets[0]
-                        if first_market['type'] == 'binary':
-                            odds_display = f"Yes: {first_market['yes_price']:.1f}% | No: {first_market['no_price']:.1f}%"
-                        else:
-                            top_options = sorted(first_market['options'], key=lambda x: x['price'], reverse=True)[:3]
-                            odds_display = " | ".join([f"{opt['option']}: {opt['price']:.1f}%" for opt in top_options])
-                    else:
-                        odds_display = "No data"
-                    
-                    if total_volume >= 1000000: vol_str = f"${total_volume/1000000:.1f}M"
-                    elif total_volume >= 1000: vol_str = f"${total_volume/1000:.0f}K"
-                    else: vol_str = f"${total_volume:.0f}"
-                    
-                    candidates.append({
-                        "title": title,
-                        "odds": odds_display,
-                        "volume": vol_str,
-                        "slug": event.get('slug', ''),
-                        "url": f"https://polymarket.com/event/{event.get('slug', '')}",
-                        "match_score": match_score,
-                        "vol_raw": total_volume,
-                        "markets": all_markets  # 包含所有子市场
-                    })
-                except: 
-                    continue
-            
-            # 按匹配度和音量排序
-            candidates.sort(key=lambda x: (x['match_score'], x['vol_raw']), reverse=True)
-    except:
-        pass
-    
-    return candidates[:15]  # 返回最多15个结果
-
 def search_market_data_list(user_query):
-    """增强版市场搜索：结合Exa搜索和API直接搜索"""
-    if not EXA_AVAILABLE or not EXA_API_KEY: 
-        # Fallback: 直接通过API搜索相关市场
-        return search_markets_by_api(user_query)
-    
+    """搜索Polymarket，逻辑与主页列表统一"""
+    if not EXA_AVAILABLE or not EXA_API_KEY: return []
     candidates = []
     try:
         exa = Exa(EXA_API_KEY)
         keywords = generate_keywords(user_query)
-        
-        # 策略1: 精确搜索
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=10,
+            num_results=5,
             type="neural",
             include_domains=["polymarket.com"]
         )
-        
         for result in search_resp.results:
             match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
             if match:
                 slug = match.group(1)
-                market_data = fetch_market_by_slug(slug)
-                if market_data and market_data not in candidates:
-                    candidates.append(market_data)
-        
-        # 策略2: 如果结果少于3个，使用API直接搜索
-        if len(candidates) < 3:
-            api_results = search_markets_by_api(user_query)
-            for result in api_results:
-                if result not in candidates:
-                    candidates.append(result)
-    except:
-        # 出错时使用API搜索作为备选
-        return search_markets_by_api(user_query)
-    
-    return candidates[:15]  # 返回最多15个结果
+                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                data = requests.get(api_url, timeout=5).json()
+                if data and isinstance(data, list):
+                    # 使用统一的处理函数
+                    market_data = process_polymarket_event(data[0])
+                    if market_data:
+                        candidates.append(market_data)
+    except: pass
+    return candidates
 
 def is_chinese_input(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
-# Helper to simulate asset prices for context (In prod, use real API)
-def get_asset_context():
-    return """
-    📊 **[Global Macro Anchors]**
-    - Gold (XAU): ~$2,350 (Safe Haven)
-    - Oil (WTI): ~$80 (Geopolitics)
-    - USD Index (DXY): ~104 (Global Liquidity)
-    """
-
 def get_agent_response(history, market_data):
     """
-    Handles the full chat conversation with DUAL ENGINE logic (Arb Trader vs Macro Strategist).
+    Handles the full chat conversation with PORTFOLIO MANAGER logic.
     """
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    macro_anchors = get_asset_context()
     
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # === PATH A: PREDICTION MARKET FOUND (ARBITRAGE MODE) ===
+    # 1. Market Context Construction
     if market_data:
-        # 构建详细的市场信息
-        markets_detail = []
-        for idx, m in enumerate(market_data.get('markets', []), 1):
-            if m['type'] == 'binary':
-                markets_detail.append(
-                    f"   {idx}. **{m['question']}**\n"
-                    f"      - Yes: {m['yes_price']:.1f}% | No: {m['no_price']:.1f}%\n"
-                    f"      - Volume: ${m['volume']:,.0f}"
-                )
-            else:
-                options_str = "\n".join([f"      - {opt['option']}: {opt['price']:.1f}%" for opt in m['options']])
-                markets_detail.append(
-                    f"   {idx}. **{m['question']}**\n"
-                    f"{options_str}\n"
-                    f"      - Volume: ${m['volume']:,.0f}"
-                )
-        
-        markets_info = "\n\n".join(markets_detail) if markets_detail else "No market data"
-        
         if is_cn:
             market_context = f"""
-            ✅ **[已锁定预测市场事件]**
-            - **事件:** {market_data['title']}
-            - **总交易量:** {market_data['volume']}
-            - **子市场数量:** {len(market_data.get('markets', []))}
+            ✅ **[真实资金定价] Polymarket 数据**
+            - **问题:** {market_data['title']}
+            - **当前赔率 (Top 3):** {market_data['odds']}
+            - **资金量:** {market_data['volume']}
             
-            **所有子市场详情:**
-{markets_info}
-            
-            {macro_anchors}
-            """
-            system_prompt = f"""
-            你是一位 **事件驱动型对冲基金经理 (Event-Driven PM)**，专精于 **预测市场套利 (Prediction Market Arbitrage)**。
-            当前日期: {current_date}
-            
-            **绝对指令 (NON-NEGOTIABLE):**
-            1. **禁止寒暄:** 不要说"作为一名..."，直接开始分析。
-            2. **全面分析:** 这个事件包含 {len(market_data.get('markets', []))} 个子市场，你需要分析所有子市场的赔率分布，找出最佳交易机会。
-            3. **语言强制:** **必须全程使用中文回答**。
-            4. **强制链接:** 提到标的时使用Markdown链接。
-
-            {market_context}
-            
-            --- 预测市场狙击备忘录 ---
-            
-            ### 0. 📰 事件背景速览
-            * **一句话还原**: 发生了什么？
-            
-            ### 1. 🎲 Polymarket 狙击策略 (核心)
-            * **赔率分布分析**: 
-              - 逐一分析每个子市场的赔率
-              - 市场赔率(Implied Prob) vs 你的真实概率评估(True Prob)
-              - 识别哪些子市场存在 EV+ 机会
-            * **最佳交易指令** (按优先级排序):
-              1. **首选标的**: [子市场名称]
-                 - **买入方向**: [Yes / No / 具体选项]
-                 - **目标赔率**: 在什么价格区间入手？
-                 - **凯利公式**: 建议仓位比例
-              2. **次选标的**: (如果有)
-                 - 同上格式
-            
-            ### 2. 🩸 宏观逻辑校验
-            * **驱动因子**: 各个子市场的赔率变动背后的逻辑是什么？
-            * **相关性**: 不同子市场之间是否存在逻辑矛盾或套利空间？
-            * **潜在催化剂**: 未来24-48小时内什么消息会导致赔率剧烈波动？
-            
-            ### 3. 📈 关联资产对冲 (Capital Markets)
-            * **股票/Crypto**: 如何在传统市场放大收益或对冲风险？
-              - **标的**: [代码+链接] (如 [SPY](https://finance.yahoo.com/quote/SPY))
-              - **逻辑**: 如果预测正确，这个资产会怎么走？
-            
-            ### 4. 🏁 最终决策
-            * 一句话交易指令（优先级最高的标的）。
+            **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
             """
         else:
             market_context = f"""
-            ✅ **[TARGET ACQUIRED: POLYMARKET EVENT]**
-            - **Event:** {market_data['title']}
-            - **Total Volume:** {market_data['volume']}
-            - **Sub-Markets:** {len(market_data.get('markets', []))}
+            ✅ **[MARKET PRICING] Polymarket Data**
+            - **Market:** {market_data['title']}
+            - **Top 3 Odds:** {market_data['odds']}
+            - **Volume:** {market_data['volume']}
             
-            **All Sub-Market Details:**
-{markets_info}
-            
-            {macro_anchors}
+            **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
             """
-            system_prompt = f"""
-            You are an **Event-Driven Portfolio Manager** specializing in **Prediction Market Arbitrage**.
-            Current Date: {current_date}
-            
-            **STRICT RULES:**
-            1. **NO INTRO:** Start directly.
-            2. **COMPREHENSIVE ANALYSIS:** This event contains {len(market_data.get('markets', []))} sub-markets. Analyze ALL of them to find the best EV+ opportunities.
-            3. **LANGUAGE:** English Only.
-            4. **LINKS:** Mandatory.
-
-            {market_context}
-            
-            --- ARBITRAGE MEMO ---
-            
-            ### 0. 📰 Quick Context
-            * **The Event**: De-noise the headline.
-            
-            ### 1. 🎲 Polymarket Sniper Strategy (CORE)
-            * **Odds Distribution Analysis**:
-              - Analyze each sub-market's odds
-              - Market Implied Prob vs. Your True Prob
-              - Identify which sub-markets have Positive EV
-            * **Top Trading Opportunities** (ranked by priority):
-              1. **Primary Target**: [Sub-market name]
-                 - **Action**: Buy [Yes / No / Specific Option]
-                 - **Entry Zone**: Target price
-                 - **Sizing**: Kelly Criterion estimate
-              2. **Secondary Target**: (if applicable)
-                 - Same format
-            
-            ### 2. 🩸 Logic Check
-            * **Drivers**: What drives the odds in each sub-market?
-            * **Correlation**: Any logical contradictions or arbitrage between sub-markets?
-            * **Catalyst**: What next event moves these odds?
-            
-            ### 3. 📈 Correlated Asset Hedges
-            * **Equities/Crypto**: How to leverage this view in traditional markets?
-              - **Ticker**: [Link]
-              - **Correlation**: If Polymarket bet wins, does this asset moon or tank?
-            
-            ### 4. 🏁 Final Verdict
-            * Bottom line instruction (highest priority target).
-            """
-
-    # === PATH B: NO MARKET FOUND (MACRO STRATEGIST MODE) ===
     else:
         if is_cn:
-            market_context = f"❌ **无直接预测市场数据**。请基于以下宏观锚点进行推演：\n{macro_anchors}"
-            system_prompt = f"""
-            你是一位 **地缘政治情报交易员 (Geopolitical Alpha Trader)**，曾任职于 Bridgewater。
-            当前日期: {current_date}
-            
-            **绝对指令:**
-            1. **禁止寒暄:** 不要说废话，直接输出报告。
-            2. **逻辑推演:** 既然没有直接的赌局，你需要寻找股市/汇市的"代理赌局" (Proxy Trades)。
-            3. **语言强制:** **必须全程使用中文回答**。
-            4. **强制链接:** 必须加链接。
-
-            {market_context}
-            
-            --- 地缘政治 Alpha 交易备忘录 ---
-            
-            ### 0. 📰 情报背景 (Context)
-            * **事实还原**: 去噪后的核心事件。
-            * **情报评级**: [高/中/低] 信号强度。
-            
-            ### 1. 🗺️ 博弈地图 (Game Theory)
-            * **关键决策者**: 谁在桌上？他们的【目标函数】是什么？
-            * **二阶效应**: 如果A发生，B会如何报复？推演博弈树。
-            
-            ### 2. 🎯 市场定价错误 (Mispricing)
-            * **当前共识**: 市场现在Price-in了什么？
-            * **预期差**: 市场忽略了哪个维度的风险或机会？
-            
-            ### 3. 📊 交易架构设计 (The Trade)
-            * **核心命题**: 一句话定义赌注。
-            * **头寸结构**:
-              - **方向性头寸 (60%)**: [标的+链接]。*入场逻辑。*
-              - **对冲头寸 (25%)**: [标的+链接]。*必须与核心逻辑自洽 (Anti-Contradiction)。*
-              - **期权/凸性 (15%)**: 捕捉尾部风险。
-            * **压力测试**: 若核心假设失效，最大回撤是多少？
-            
-            ### 4. ⚡ 执行路线图
-            * **监测**: 盯着哪个指标？
-            * **失效**: 出现什么信号说明我们错了？
-            
-            ### 5. 🚨 最终指令
-            * [做多/做空] [资产] [仓位]
-            """
+            market_context = "❌ **无直接预测市场数据**。"
         else:
-            market_context = f"❌ **NO DIRECT MARKET DATA**. Derive logic from macro anchors:\n{macro_anchors}"
-            system_prompt = f"""
-            You are a **Geopolitical Alpha Trader** (ex-Bridgewater).
-            Current Date: {current_date}
-            
-            **STRICT RULES:**
-            1. **NO INTRO:** Start directly.
-            2. **PROXY TRADES:** Since no prediction market exists, find the best "Proxy Trades" in equities/FX.
-            3. **LANGUAGE:** English Only.
-            4. **LINKS:** Mandatory.
+            market_context = "❌ **NO DIRECT MARKET DATA**."
 
-            {market_context}
+    # 2. System Prompt Selection (PM MODE v19.0)
+    if is_cn:
+        system_prompt = f"""
+        你是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
+        当前日期: {current_date}
+        
+        **核心指令:**
+        1. **直接输出:** 不要自我介绍，不要说“作为一名基金经理”，直接开始分析。
+        2. **逻辑自洽:** 严禁逻辑断层（如看空法币却做多美元）。
+        3. **强制链接:** 提到标的时必须加链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
+        4. **语言强制:** **必须全程使用中文回答**。
+
+        {market_context}
+        
+        --- 基金经理决策备忘录 ---
+        
+        ### 0. 📰 新闻背景速览 (Context)
+        * **事件还原**: 用通俗语言快速概括发生了什么（小白视角）。
+        * **背景知识**: 为什么这件事值得关注？
+        
+        ### 1. 🩸 市场定价 vs 真实逻辑 (The Disconnect)
+        * **当前共识**: 市场目前Price-in了什么？
+        * **预期差**: 你的差异化观点是什么？
+        
+        ### 2. 🕵️‍♂️ 归因与博弈 (Attribution)
+        * **驱动力**: 资金面还是基本面？
+        * **关键博弈方**: 谁获益？谁受损？
+        
+        ### 3. 🎲 压力测试与情景分析 (Stress Test)
+        * **基准情景 (60%)**: [描述] -> 资产影响。
+        * **压力测试 (20%)**: 若核心假设失效（例如利率飙升），最大回撤是多少？对冲能否覆盖？
+        
+        ### 4. 💸 交易执行 (The Trade Book)
+        * **🎯 核心多头 (Long)**:
+            * **标的**: [代码+链接]
+            * **头寸**: 建议仓位。
+            * **逻辑**: 为什么买它？
+        * **📉 核心空头/对冲 (Short/Hedge)**:
+            * **标的**: [代码+链接]
+            * **逻辑**: 对冲什么风险？
+        * **⏳ 期限**: 持仓多久？
             
-            --- Geopolitical Alpha Trade Memo ---
+        ### 5. 🏁 最终指令 (PM Conclusion)
+        * 一句话总结交易方向。
+        """
+    else:
+        system_prompt = f"""
+        You are a **Global Macro Portfolio Manager (PM)**.
+        Current Date: {current_date}
+        
+        **INSTRUCTIONS:**
+        1. **DIRECT START:** Do NOT introduce yourself. Start immediately with the analysis.
+        2. **LOGIC:** Maintain strict logical consistency.
+        3. **LINKS:** Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
+        4. **LANGUAGE:** English Only.
+
+        {market_context}
+        
+        --- INVESTMENT MEMORANDUM ---
+        
+        ### 1. 📰 Context & Background
+        * **What Happened**: Simple explanation for general audience.
+        * **Why it Matters**: Historical context.
+        
+        ### 2. 🩸 Consensus vs. Reality (The Disconnect)
+        * **Priced In**: What is the market pricing?
+        * **The Edge**: What is the market missing?
+        
+        ### 3. 🕵️‍♂️ Attribution & Game Theory
+        * **Drivers**: Fundamental or Flow?
+        * **Cui Bono**: Who benefits?
+        
+        ### 4. 🎲 Stress Test & Scenarios
+        * **Base Case**: Impact.
+        * **Stress Test**: What if you are wrong? (Drawdown risk).
+        
+        ### 5. 💸 The Trade Book (Execution)
+        * **🎯 Top Longs**: [Ticker+Link] & Thesis.
+        * **📉 Shorts / Hedges**: [Ticker+Link] & Rationale.
+        * **⏳ Structure**: Duration/Instrument.
             
-            ### 0. 📰 Intelligence Context
-            * **Fact Check**: De-noise the event.
-            * **Rating**: [High/Med/Low] Signal Strength.
-            
-            ### 1. 🗺️ Game Theory Map
-            * **Players**: Who matters? What are their incentives?
-            * **Second-Order**: If A happens, what does B do?
-            
-            ### 2. 🎯 Market Mispricing
-            * **Consensus**: What is priced in?
-            * **The Gap**: What is the market missing?
-            
-            ### 3. 📊 Trade Architecture
-            * **Thesis**: One sentence bet.
-            * **Positions**:
-              - **Directional (60%)**: [Ticker+Link]. *Logic.*
-              - **Hedge (25%)**: [Ticker+Link]. *Must be consistent.*
-              - **Convexity (15%)**: Tail risk options.
-            * **Stress Test**: Drawdown risk if thesis fails.
-            
-            ### 4. ⚡ Execution
-            * **Watch**: Key indicators.
-            * **Invalidation**: When to fold?
-            
-            ### 5. 🚨 Final Order
-            * [Long/Short] [Asset] [Size]
-            """
+        ### 6. 🏁 PM Conclusion
+        * Bottom line instruction.
+        """
     
     api_messages = [{"role": "user", "parts": [system_prompt]}]
     for msg in history:
@@ -947,8 +655,9 @@ with s_mid:
         st.session_state.search_candidates = []
         
     input_val = st.session_state.get("user_news_text", "")
+    # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
     user_query = st.text_area("Analyze News", value=input_val, height=70, 
-                              placeholder="Paste a headline (e.g., 'Fed decision in April')...", 
+                              placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
                               label_visibility="collapsed",
                               on_change=on_input_change, key="news_input_box")
     
@@ -1006,70 +715,14 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
     
     if st.session_state.current_market:
         m = st.session_state.current_market
-        
-        # 构建子市场的HTML显示
-        markets_html = ""
-        for idx, market in enumerate(m.get('markets', []), 1):
-            if market['type'] == 'binary':
-                markets_html += f"""
-                <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #ef4444;">
-                    <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:6px;">{idx}. {market['question']}</div>
-                    <div style="display:flex; gap:10px;">
-                        <div style="flex:1; background:rgba(16,185,129,0.1); padding:6px; border-radius:4px; border:1px solid rgba(16,185,129,0.2);">
-                            <span style="font-size:0.7rem; color:#9ca3af;">Yes</span>
-                            <span style="font-size:0.95rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono'; margin-left:8px;">{market['yes_price']:.1f}%</span>
-                        </div>
-                        <div style="flex:1; background:rgba(239,68,68,0.1); padding:6px; border-radius:4px; border:1px solid rgba(239,68,68,0.2);">
-                            <span style="font-size:0.7rem; color:#9ca3af;">No</span>
-                            <span style="font-size:0.95rem; color:#ef4444; font-weight:700; font-family:'JetBrains Mono'; margin-left:8px;">{market['no_price']:.1f}%</span>
-                        </div>
-                    </div>
-                    <div style="font-size:0.7rem; color:#6b7280; margin-top:4px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
-                </div>
-                """
-            else:
-                options_html = ""
-                sorted_options = sorted(market['options'], key=lambda x: x['price'], reverse=True)
-                for opt in sorted_options:
-                    bar_width = opt['price']
-                    options_html += f"""
-                    <div style="margin-bottom:4px;">
-                        <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:2px;">
-                            <span style="color:#e5e7eb;">{opt['option']}</span>
-                            <span style="color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">{opt['price']:.1f}%</span>
-                        </div>
-                        <div style="background:rgba(255,255,255,0.1); height:4px; border-radius:2px; overflow:hidden;">
-                            <div style="background:#fbbf24; height:100%; width:{bar_width}%;"></div>
-                        </div>
-                    </div>
-                    """
-                markets_html += f"""
-                <div style="background:rgba(255,255,255,0.03); padding:10px; border-radius:6px; margin-bottom:8px; border-left:3px solid #fbbf24;">
-                    <div style="font-size:0.85rem; color:#e5e7eb; font-weight:600; margin-bottom:8px;">{idx}. {market['question']}</div>
-                    {options_html}
-                    <div style="font-size:0.7rem; color:#6b7280; margin-top:6px; text-align:right;">Vol: ${market['volume']:,.0f}</div>
-                </div>
-                """
-        
         st.markdown(f"""
         <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
-            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market Event</div>
-            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px; margin-bottom:15px;">{m['title']}</div>
-            
-            <div style="display:flex; gap:15px; margin-bottom:15px; padding:10px; background:rgba(255,255,255,0.05); border-radius:6px;">
-                <div>
-                    <div style="font-size:0.7rem; color:#9ca3af;">Total Volume</div>
-                    <div style="font-size:1rem; color:#fbbf24; font-weight:700; font-family:'JetBrains Mono';">{m['volume']}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.7rem; color:#9ca3af;">Sub-Markets</div>
-                    <div style="font-size:1rem; color:#10b981; font-weight:700; font-family:'JetBrains Mono';">{len(m.get('markets', []))}</div>
-                </div>
+            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px;">{m['title']}</div>
+            <div style="display:flex; justify-content:space-between; margin-top:10px; align-items:center;">
+                <div style="font-family:'JetBrains Mono'; color:#ef4444; font-weight:700;">{m['odds']}</div>
+                <div style="color:#6b7280; font-size:0.8rem;">Vol: {m['volume']}</div>
             </div>
-            
-            <div style="font-size:0.8rem; color:#ef4444; font-weight:600; margin-bottom:10px; text-transform:uppercase;">All Sub-Markets:</div>
-            {markets_html}
-            
             <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
         </div>
         """, unsafe_allow_html=True)
@@ -1214,6 +867,7 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
                                 <div class="market-title-mod">{m['title']}</div>
                                 <div class="market-vol">{m['vol_str']}</div>
                             </div>
+                            <div style="font-size:0.75rem; color:#9ca3af; margin-top:4px;">{m['odds']}</div>
                         </div>
                     </a>
                     """, unsafe_allow_html=True)
