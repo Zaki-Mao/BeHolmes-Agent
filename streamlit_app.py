@@ -55,15 +55,12 @@ for key, value in default_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# --- 🟢 新增：处理点击新闻的回调函数 ---
-# 这个函数必须定义在 UI 渲染之前，供 on_click 调用
+# --- 🟢 处理点击新闻的回调函数 ---
 def trigger_analysis(news_title):
     st.session_state.user_news_text = news_title
     st.session_state.show_market_selection = False
     st.session_state.current_market = None
     st.session_state.is_processing = False 
-    # 这里我们只设置文本，让主界面的 if user_query 逻辑去处理后续的点击“Reality Check”
-    # 或者，如果想更自动，可以在这里设置一个标志位 auto_start=True
 
 # ================= 🎨 2. UI THEME (CSS) =================
 st.markdown("""
@@ -403,7 +400,7 @@ if not st.session_state.messages:
 
     # === LEFT: Live Noise Stream (Auto-Refreshing) ===
     with col_news:
-        # 顶部标题栏
+        # 顶部标题栏 + 新闻源说明
         st.markdown("""
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
             <div style="font-size:0.9rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
@@ -413,12 +410,14 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
+        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:10px;">
+            Sources: Reuters • TechCrunch • CoinDesk
+        </div>
         <style>
             @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每60秒)
         # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每60秒)
         @st.fragment(run_every=60)
         def render_news_feed():
@@ -458,25 +457,25 @@ if not st.session_state.messages:
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 👇👇👇 核心修改：双按钮布局 👇👇👇
                     # 使用两列布局，左边是分析，右边是跳转
                     b_col1, b_col2 = st.columns([1, 1], gap="small")
                     
                     with b_col1:
                         # ⚡ 按钮 1: Be Holmes 分析 (功能按钮)
-                        # key 必须唯一
+                        # 🔥 FIX: 使用 hash(title) + idx 避免 DuplicateKeyError
+                        unique_key = f"btn_check_{hash(news['title'])}_{idx}"
+                        
                         st.button(
                             "⚡ Check Reality", 
-                            key=f"btn_check_{idx}", 
+                            key=unique_key, 
                             on_click=trigger_analysis, 
                             args=(news['title'],),     
                             use_container_width=True,
-                            type="primary" # 突出显示这个主要功能
+                            type="primary"
                         )
                         
                     with b_col2:
                         # 🔗 按钮 2: 查看原文 (链接按钮)
-                        # Streamlit 的 link_button 是专门用来跳转的
                         st.link_button(
                             "🔗 Read Source", 
                             url=news['link'],
@@ -485,16 +484,6 @@ if not st.session_state.messages:
                     
                     # 加一点间距，防止粘连
                     st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
-                    
-                    # 🔥 修复按钮：使用 on_click 回调
-                    # key 必须唯一，use_container_width 让按钮铺满看起来整齐
-                    st.button(
-                        "⚡ Check Reality", 
-                        key=f"btn_check_{idx}", 
-                        on_click=trigger_analysis, # 调用上面的函数
-                        args=(news['title'],),     # 传参
-                        use_container_width=True
-                    )
 
         # 调用这个局部刷新组件
         render_news_feed()
@@ -608,4 +597,3 @@ if st.session_state.messages:
     if st.button("⬅️ Back to Dashboard"):
         st.session_state.messages = []
         st.rerun()
-
