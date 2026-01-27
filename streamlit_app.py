@@ -419,6 +419,7 @@ if not st.session_state.messages:
         """, unsafe_allow_html=True)
 
         # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每60秒)
+        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每60秒)
         @st.fragment(run_every=60)
         def render_news_feed():
             # 获取最新新闻
@@ -433,29 +434,57 @@ if not st.session_state.messages:
                 return
 
             for idx, news in enumerate(latest_news):
-                # 计算相对时间 (模拟) - 实际项目中可以解析 news['published']
+                # 计算相对时间
                 time_ago = f"{idx * 15 + 2}m ago" 
                 
                 with st.container():
-                    # 纯 CSS 样式的卡片
+                    # 新闻卡片样式
                     st.markdown(f"""
                     <div style="
-                        padding: 12px;
-                        margin-bottom: 12px;
+                        padding: 12px 12px 5px 12px;
+                        margin-top: 12px;
                         background: rgba(255, 255, 255, 0.03);
                         border-left: 3px solid #ef4444;
-                        border-radius: 6px;
-                        transition: all 0.2s;
+                        border-top-left-radius: 6px;
+                        border-top-right-radius: 6px;
                     ">
                         <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:#9ca3af; margin-bottom:4px;">
                             <span style="font-weight:bold; color:#ef4444;">{news['source']}</span>
                             <span>{time_ago}</span>
                         </div>
-                        <div style="font-size:0.95rem; color:#e5e7eb; font-weight:500; line-height:1.4;">
+                        <div style="font-size:0.95rem; color:#e5e7eb; font-weight:500; line-height:1.4; margin-bottom:8px;">
                             {news['title']}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    # 👇👇👇 核心修改：双按钮布局 👇👇👇
+                    # 使用两列布局，左边是分析，右边是跳转
+                    b_col1, b_col2 = st.columns([1, 1], gap="small")
+                    
+                    with b_col1:
+                        # ⚡ 按钮 1: Be Holmes 分析 (功能按钮)
+                        # key 必须唯一
+                        st.button(
+                            "⚡ Check Reality", 
+                            key=f"btn_check_{idx}", 
+                            on_click=trigger_analysis, 
+                            args=(news['title'],),     
+                            use_container_width=True,
+                            type="primary" # 突出显示这个主要功能
+                        )
+                        
+                    with b_col2:
+                        # 🔗 按钮 2: 查看原文 (链接按钮)
+                        # Streamlit 的 link_button 是专门用来跳转的
+                        st.link_button(
+                            "🔗 Read Source", 
+                            url=news['link'],
+                            use_container_width=True
+                        )
+                    
+                    # 加一点间距，防止粘连
+                    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
                     
                     # 🔥 修复按钮：使用 on_click 回调
                     # key 必须唯一，use_container_width 让按钮铺满看起来整齐
@@ -579,3 +608,4 @@ if st.session_state.messages:
     if st.button("⬅️ Back to Dashboard"):
         st.session_state.messages = []
         st.rerun()
+
