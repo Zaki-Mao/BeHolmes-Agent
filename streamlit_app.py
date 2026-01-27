@@ -400,7 +400,7 @@ def fetch_categorized_news_v2():
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
     try:
-        # Fetch more to allow for filtering
+        # 1. Fetch more items to allow for filtering (settled/sensitive)
         url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
@@ -448,7 +448,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (List Selection + Bilingual) ---
+# --- 🔥 D. NEW AGENT LOGIC (Deep Analysis v14.0) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -458,9 +458,7 @@ def generate_keywords(user_text):
     except: return user_text
 
 def search_market_data_list(user_query):
-    """
-    Search Polymarket and return A LIST of candidates.
-    """
+    """Search Polymarket and return A LIST of candidates."""
     if not EXA_AVAILABLE or not EXA_API_KEY: return []
     
     candidates = []
@@ -521,104 +519,106 @@ def analyze_with_agent(user_news, market_data):
     
     # 1. Market Context Construction
     if market_data:
-        if is_cn:
-            market_context = f"""
-            ✅ **已找到实时预测市场数据 (Polymarket)**
-            - **市场标题:** {market_data['title']}
-            - **当前赔率:** {market_data['odds']}
-            - **交易量:** {market_data['volume']} (代表真金白银的共识)
-            
-            **核心指令:** 请将新闻声称的内容与上述市场赔率进行对比。如果新闻说“某事发生了”，但市场赔率很低，那可能是假消息或市场存在巨大预期差。
-            """
-        else:
-            market_context = f"""
-            ✅ **REAL-TIME POLYMARKET DATA FOUND**
-            - Market: {market_data['title']}
-            - Odds: {market_data['odds']}
-            - Volume: {market_data['volume']}
-            
-            **INSTRUCTION:** Compare news claim against odds. If odds don't match the news sentiment, flag it as potential FUD or Opportunity.
-            """
+        market_instruction_cn = f"""
+        ✅ **已关联 Polymarket 预测市场**
+        - **市场问题:** {market_data['title']}
+        - **当前赔率:** {market_data['odds']}
+        - **总交易量:** {market_data['volume']}
+        
+        **分析要求:** 1. 必须根据上述赔率计算【市场置信度 (Confidence Level)】。
+        2. 给出一个具体的【建议持仓时长 (Holding Duration)】（例如：事件落地前卖出/持有至202X年）。
+        3. 对比新闻情绪与市场资金流向是否背离。
+        """
+        market_instruction_en = f"""
+        ✅ **POLYMARKET DATA FOUND**
+        - **Market:** {market_data['title']}
+        - **Odds:** {market_data['odds']}
+        - **Volume:** {market_data['volume']}
+        
+        **REQUIREMENT:** 1. Calculate Market Confidence based on these odds.
+        2. Suggest a specific **Holding Duration** (e.g. Sell on news / Hold til event).
+        3. Analyze divergence between news hype and real money bets.
+        """
     else:
-        if is_cn:
-            market_context = "❌ **未找到直接相关的预测市场**。请依靠你的宏观分析能力和历史案例进行逻辑推演。"
-        else:
-            market_context = "❌ **NO DIRECT PREDICTION MARKET FOUND**. Rely on logical inference and historical precedents."
+        market_instruction_cn = "❌ **未找到对应预测市场**。请重点分析股票、基金或加密货币的交易机会。"
+        market_instruction_en = "❌ **NO DIRECT PREDICTION MARKET**. Focus heavily on Equities, ETFs, or Crypto opportunities."
 
-    # 2. System Prompt Selection based on Language
+    # 2. System Prompt Selection
     if is_cn:
         system_prompt = f"""
-        你不仅是 "Be Holmes"，更是一位顶级的对冲基金宏观策略师 (Hedge Fund Macro Strategist)。
+        你是一位拥有20年经验的【全球宏观策略师】兼【普通市民财富顾问】。
         当前日期: {current_date}
         
-        **任务目标:** 分析用户输入的新闻，判断其真实性，并挖掘【投资 Alpha】。
+        **任务目标:** 对用户输入的新闻进行全方位深度解析，既要有机构视角的专业度，也要有对普通人的实际生活/理财建议。
         
-        {market_context}
+        {market_instruction_cn}
         
-        --- 分析协议 ---
+        --- 深度分析框架 (必须严格遵循) ---
         
-        1. **真相审计 (REALITY AUDIT)**: 
-           - 评估新闻来源可信度和情绪框架（是恐惧还是贪婪？）。
-           - 如果有市场赔率，必须以赔率为基准进行验证。
+        ### 1. 📰 新闻背景与核心事实
+        * **事件还原**: 用简练的语言概括发生了什么（去噪）。
+        * **核心脉络**: 为什么这件事现在很重要？它的历史背景是什么？
         
-        2. **二阶思维 (SECOND-ORDER THINKING)**: 
-           - 如果新闻为真，直接影响是什么？
-           - 连锁反应是什么？（例如：芯片短缺 -> 汽车减产 -> 二手车涨价）
+        ### 2. 🌪️ 多维影响深度拆解
+        * **🎯 本行业冲击**: 直接受影响的公司、供应链或技术路线。
+        * **🕸️ 跨行业连锁反应**: 蝴蝶效应（例如：石油涨价 -> 物流成本 -> 食品通胀）。
+        * **🏦 宏观与金融市场**: 对股市大盘、利率、汇率或市场风险偏好（Risk-on/off）的影响。
+        * **🧑‍💼 对普通市民的影响 (关键)**: 
+            * *生活成本*: 会变贵吗？
+            * *就业环境*: 行业会裁员还是招人？
+            * *普通人应对*: 需要囤货、换汇或调整房贷策略吗？
         
-        3. **投资标的 (INVESTMENT TARGETS)**: 
-           - **板块 (Sectors)**: 明确指出受影响的行业。
-           - **具体标的 (Tickers)**: 必须列出股票/代币代码 (如 NVDA, BTC, 600519.SH)。
-           - **方向 (Direction)**: 看多 (Long) / 看空 (Short)。
-        
-        --- 输出格式 (必须使用 Markdown) ---
-        
-        ### 🎯 真相判定: [真相/炒作/虚假/不确定]
-        **概率:** [0-100]%
-        *(一句话理由，基于市场赔率或逻辑)*
-        
-        ### 🕵️‍♂️ 深度复盘
-        [专业、简练的事件拆解。2-3句话。]
-        
-        ### 🚀 投资信号 (Alpha)
-        * **📈 看多 (Bullish / Long):**
-            * **板块:** [列出板块]
-            * **标的:** [列出代码] - *简要理由*
-        * **📉 看空 (Bearish / Short):**
-            * **资产:** [列出资产]
-            * **风险:** [简述风险]
+        ### 3. 💰 投资与交易建议 (实操干货)
+        *(如果上方有 Polymarket 数据，请优先分析其赔率机会)*
+        * **🎲 预测市场策略 (如有)**:
+            * *置信度*: 高/中/低
+            * *操作*: 做多 Yes 还是 No？
+            * *时长*: 短线博弈还是长线持有？
+        * **📈 资本市场机会**:
+            * *股票/ETF*: 具体代码 (如 NVDA, 510300.SH)。*看多逻辑简述*。
+            * *加密货币*: 相关代币。
+            * *避坑指南*: 哪些资产可能暴雷？
             
-        *(免责声明：非投资建议，仅供信息参考。)*
+        ### 4. 🏁 总结
+        * 一句话总结核心观点。
         """
     else:
         system_prompt = f"""
-        You are **Be Holmes**, a top-tier Hedge Fund Analyst.
+        You are a seasoned **Global Macro Strategist** and **Personal Wealth Advisor**.
         Current Date: {current_date}
         
-        TARGET: Analyze news input for TRUTH and INVESTMENT ALPHA.
+        **MISSION:** Provide a deep, multi-layered analysis of the news. Balance institutional-grade depth with practical advice for the everyday citizen.
         
-        {market_context}
+        {market_instruction_en}
         
-        --- ANALYSIS PROTOCOL ---
-        1. **REALITY AUDIT**: Assess source credibility and validate against Market Odds (if provided).
-        2. **SECOND-ORDER THINKING**: If true, what is the ripple effect?
-        3. **INVESTMENT TARGETS**: Identify Sectors, specific Tickers/Assets, and Direction.
+        --- ANALYSIS FRAMEWORK ---
         
-        --- OUTPUT FORMAT (Markdown) ---
+        ### 1. 📰 Context & Core Facts
+        * **De-noise**: What actually happened?
+        * **Context**: Why does this matter *now*?
         
-        ### 🎯 Reality Verdict: [Verdict]
-        **Probability:** [0-100]%
-        *(Justification)*
-        
-        ### 🕵️‍♂️ Deep Dive
-        [Professional breakdown]
-        
-        ### 🚀 Investment Signals (Alpha)
-        * **📈 Bullish / Long:**
-            * **Sectors:** [List]
-            * **Tickers:** [List] - *Why*
-        * **📉 Bearish / Short:**
-            * **Assets:** [List]
-            * **Risk:** [Brief risk]
+        ### 2. 🌪️ Multi-Dimensional Impact
+        * **🎯 Industry Impact**: Direct hits to companies/supply chains.
+        * **🕸️ Ripple Effects**: Indirect consequences on other sectors.
+        * **🏦 Macro & Financials**: Impact on broad markets, rates, or FX.
+        * **🧑‍💼 Citizen's Perspective (Crucial)**: 
+            * *Cost of Living*: Inflation risks?
+            * *Jobs*: Hiring or layoffs?
+            * *Actionable Life Advice*: Should they refinance? Save? Buy?
+            
+        ### 3. 💰 Investment & Trading Strategy
+        *(If Polymarket data exists above, prioritize analyzing it)*
+        * **🎲 Prediction Market Strategy (If applicable)**:
+            * *Confidence*: High/Med/Low
+            * *Trade*: Bet Yes or No?
+            * *Duration*: Hold duration?
+        * **📈 Capital Markets**:
+            * *Stocks/ETFs*: Specific Tickers (e.g., TSLA, SPY). *Bullish/Bearish rationale.*
+            * *Crypto*: Relevant tokens.
+            * *Risk Warning*: Assets to avoid.
+            
+        ### 4. 🏁 Summary
+        * One sentence bottom line.
         """
     
     messages = [
