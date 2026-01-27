@@ -52,8 +52,8 @@ st.set_page_config(
 default_state = {
     "messages": [],
     "current_market": None,
-    "search_candidates": [],
-    "search_stage": "input",
+    "search_candidates": [],     # Stores list of found markets
+    "search_stage": "input",     # input -> selection -> analysis
     "user_news_text": "",
     "is_processing": False,
     "last_user_input": "",
@@ -449,7 +449,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (PM Mode v17.0) ---
+# --- 🔥 D. NEW AGENT LOGIC (List Selection + Bilingual + Chat Memory + Links + DEEP INSIGHT + MACRO FIX) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -509,6 +509,7 @@ def get_agent_response(history, market_data):
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
+    # Corrected accessing of content
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
@@ -519,7 +520,7 @@ def get_agent_response(history, market_data):
             ✅ **[真实资金定价] Polymarket 数据**
             - **问题:** {market_data['title']}
             - **赔率:** {market_data['odds']}
-            - **成交量:** {market_data['volume']}
+            - **资金量:** {market_data['volume']}
             
             **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
             """
@@ -538,16 +539,18 @@ def get_agent_response(history, market_data):
         else:
             market_context = "❌ **NO DIRECT MARKET DATA**. Derive implied probability from logical inference."
 
-    # 2. System Prompt Selection (PORTFOLIO MANAGER MODE)
+    # 2. System Prompt Selection (PORTFOLIO MANAGER MODE - v18.0 Fixed)
     if is_cn:
         system_prompt = f"""
         你不仅是分析师，更是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
         当前日期: {current_date}
         你的目标不是写新闻通稿，而是构建 **高赔率的交易组合**。
         
-        **分析原则 (Iron Rules):**
+        **分析原则 (Iron Rules - 必须严格遵守):**
         1. **寻找预期差 (Variant Perception)**: 市场现在的定价Price-in了什么？你的观点与之有何不同？差异就是利润来源。
-        2. **区分信号与噪音**: 谁在推动这个叙事？是否有具体利益相关方？（Cui Bono原则）
+        2. **逻辑自洽 (Anti-Contradiction)**: 
+           - 严禁出现逻辑断层。例如：如果核心观点是“法币体系崩溃看多黄金”，则对冲手段绝不能是“做多美元”，而应是“做空垃圾债”或“买入抗通胀国债”。
+           - 对冲必须针对“如果你的核心假设错了”这一场景。
         3. **量化思维**: 不要说“风险很大”，要说“发生X的概率约为30%，若发生则资产Y下跌20%”。
         4. **交易结构化**: 给出具体的【入场点】、【失效点(止损逻辑)】和【工具选择】。
         5. **强制链接**: 提到具体标的时，必须使用Markdown链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
@@ -566,20 +569,21 @@ def get_agent_response(history, market_data):
         * **驱动力**: 是基本面改变，还是情绪资金/做市商在逼空？
         * **关键决策者**: 涉及的人物（如CEO、政客）的历史行为模式是什么？
         
-        ### 3. 🎲 情景推演 (Scenario Analysis)
+        ### 3. 🎲 压力测试与情景分析 (Stress Test)
         * **基准情景 (60%)**: [描述] -> 对资产A的影响。
         * **牛市情景 (20%)**: [描述] -> 对资产B的影响。
-        * **黑天鹅/尾部风险 (20%)**: [描述] -> 必须对冲的风险点。
+        * **压力测试 (20%)**: 若核心假设失效（例如实际利率飙升50bps），组合最大回撤是多少？当前的对冲能否覆盖？
         
         ### 4. 💸 交易执行 (The Trade Book)
         *(请给出具体操作建议)*
         * **🎯 核心多头 (Long)**:
             * **标的**: [代码+链接]
+            * **头寸**: 建议仓位 (如 5-10% NAV)。
             * **逻辑**: 它是受益于“铲子效应”还是“直接涨价”？
             * **失效点**: 如果发生[事件X]，立即止损。
         * **📉 核心空头/对冲 (Short/Hedge)**:
             * **标的**: [代码+链接] (如做空某高估股票，或买入看跌期权)
-            * **逻辑**: 谁的护城河被打破了？
+            * **逻辑**: 必须与核心多头逻辑负相关，或在核心逻辑失效时能获利。
         * **⏳ 期限与工具**: 建议使用股票、期权还是期货？持仓多久？
             
         ### 5. 🏁 最终指令 (PM Conclusion)
@@ -593,10 +597,11 @@ def get_agent_response(history, market_data):
         
         **IRON RULES:**
         1. **Variant Perception**: What is priced in? What is the market missing? That gap is your Alpha.
-        2. **Quantify**: Don't say "risky". Say "30% prob of X, implied impact -15%".
-        3. **Structure**: Give me Entry, Invalidation (Stop Loss logic), and Instrument choice.
-        4. **Smart Links**: Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
-        5. **Language**: **Output MUST be in English**.
+        2. **Logical Consistency**: Avoid contradictions. If Thesis = "Fiat debasement", Hedge cannot be "Long USD". Hedge must be "Short HYG" or similar.
+        3. **Quantify**: "30% prob of X, implied impact -15%".
+        4. **Structure**: Entry, Invalidation (Stop Loss), and Instrument.
+        5. **Smart Links**: Link all tickers.
+        6. **Language**: **Output MUST be in English**.
 
         {market_context}
         
@@ -611,28 +616,31 @@ def get_agent_response(history, market_data):
         * **Driver**: Fundamental shift or Liquidity/Gamma squeeze?
         * **Behavioral**: Analyze the incentives of key players (Cui Bono).
         
-        ### 3. 🎲 Scenario Probabilities (Expected Value)
+        ### 3. 🎲 Stress Test & Scenarios
         * **Base Case (60%)**: [Outcome] -> Asset Impact.
         * **Bull Case (20%)**: [Outcome] -> Asset Impact.
-        * **Tail Risk (20%)**: [Outcome] -> The "Widowmaker" scenario.
+        * **Stress Test (20%)**: If core thesis fails (e.g., Rates +50bps), what is the drawdown? Does the hedge work?
         
         ### 4. 💸 The Trade Book (Execution)
         * **🎯 Top Longs**:
             * **Asset**: [Ticker+Link]
-            * **Thesis**: Why this specific asset?
+            * **Sizing**: High/Med Conviction.
             * **Invalidation**: "Sell if..."
         * **📉 Shorts / Hedges**:
             * **Asset**: [Ticker+Link]
-            * **Rationale**: Who is the loser?
+            * **Rationale**: Must cover the tail risk of the Long thesis.
         * **⏳ Structure**: Spot vs Options? Duration?
             
         ### 5. 🏁 PM Conclusion
         * The "Bottom Line" trade instruction.
         """
     
+    # Corrected API message construction to fix KeyError
     api_messages = [{"role": "user", "parts": [system_prompt]}]
     for msg in history:
+        # Standardize role mapping
         role = "user" if msg['role'] == "user" else "model"
+        # Fix: Ensure content is passed correctly to parts
         api_messages.append({"role": role, "parts": [msg['content']]})
         
     try:
@@ -655,7 +663,6 @@ with s_mid:
         st.session_state.search_candidates = []
         
     input_val = st.session_state.get("user_news_text", "")
-    # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
     user_query = st.text_area("Analyze News", value=input_val, height=70, 
                               placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
                               label_visibility="collapsed",
