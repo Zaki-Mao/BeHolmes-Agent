@@ -121,7 +121,7 @@ st.markdown("""
         border-radius: 6px; 
         margin-bottom: 15px;
         border: 1px solid rgba(255,255,255,0.08);
-        font-family: 'Courier New', monospace; /* 更有终端感 */
+        font-family: 'Courier New', monospace;
     }
     .clock-item {
         font-size: 0.75rem;
@@ -131,7 +131,7 @@ st.markdown("""
         gap: 5px;
     }
     .clock-item b { color: #e5e7eb; font-weight: 700; }
-    .clock-time { color: #10b981; } /* 绿色数字 */
+    .clock-time { color: #10b981; }
 
     /* News Feed Grid Cards */
     .news-grid-card {
@@ -144,7 +144,7 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         justify-content: space-between;
-        transition: all 0.2s;
+        transition: all 0.5s ease-in-out; /* 增加过渡动画 */
     }
     .news-grid-card:hover {
         background: rgba(255, 255, 255, 0.08);
@@ -213,6 +213,19 @@ st.markdown("""
         padding: 20px;
         margin-top: 20px;
     }
+    
+    /* Rotation Progress Bar */
+    .rotation-bar {
+        height: 2px;
+        background: rgba(255,255,255,0.1);
+        margin-bottom: 10px;
+        overflow: hidden;
+    }
+    .rotation-fill {
+        height: 100%;
+        background: #ef4444;
+        transition: width 1s linear;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -230,14 +243,16 @@ def fetch_rss_news():
     try:
         for url in rss_urls:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:4]: # 取更多，因为是双列
+            # 🔥 抓取更多：每个源抓 10 条，保证有足够内容轮播
+            for entry in feed.entries[:10]: 
                 news.append({
                     "title": entry.title,
                     "source": feed.feed.title if 'title' in feed.feed else "News",
                     "link": entry.link
                 })
     except: pass
-    return news[:12] # Limit total
+    # 返回最多 30 条混合新闻
+    return news[:30] 
 
 # --- B. Market Logic (Categorized) ---
 @st.cache_data(ttl=60)
@@ -394,7 +409,6 @@ st.markdown("""
 # --- 4.2 Main Search Bar (The Core Interaction) ---
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
-    # 检查是否有从新闻流点击过来的输入
     input_val = st.session_state.get("user_news_text", "")
     user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline or click a news item below to reality check...", label_visibility="collapsed")
     
@@ -427,7 +441,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 if not st.session_state.messages:
     col_news, col_markets = st.columns([1, 1], gap="large")
 
-    # === LEFT: Live Noise Stream (Auto-Refreshing) ===
+    # === LEFT: Live Noise Stream (Auto-Refreshing + Rotating) ===
     with col_news:
         # 顶部标题栏
         st.markdown("""
@@ -439,21 +453,24 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
+        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:15px; font-style:italic;">
+            Sources: Reuters • TechCrunch • CoinDesk
+        </div>
         <style>
             @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
         </style>
         """, unsafe_allow_html=True)
 
-        # 🔥 核心修改：使用 st.fragment 实现每秒刷新UI，但数据抓取有5分钟缓存
+        # 🔥 核心修改：每 1 秒刷新UI
         @st.fragment(run_every=1)
         def render_news_feed():
-            # 1. 渲染全球时间 (World Clock)
+            # 1. 渲染全球时间
             now_utc = datetime.datetime.now(datetime.timezone.utc)
             times = {
                 "NYC": (now_utc - datetime.timedelta(hours=5)).strftime("%H:%M"),
                 "LON": now_utc.strftime("%H:%M"),
-                "ABD": (now_utc + datetime.timedelta(hours=4)).strftime("%H:%M"), # Abu Dhabi
-                "BJS": (now_utc + datetime.timedelta(hours=8)).strftime("%H:%M"), # Beijing
+                "ABD": (now_utc + datetime.timedelta(hours=4)).strftime("%H:%M"),
+                "BJS": (now_utc + datetime.timedelta(hours=8)).strftime("%H:%M"),
             }
             
             st.markdown(f"""
@@ -465,23 +482,51 @@ if not st.session_state.messages:
             </div>
             """, unsafe_allow_html=True)
 
-            # 2. 倒计时逻辑 (刷新倒计时)
-            # 计算距离下一次缓存失效 (300s) 的时间
-            seconds_left = 300 - (int(time.time()) % 300)
-            mins, secs = divmod(seconds_left, 60)
-            timer_str = f"{mins:02d}:{secs:02d}"
+            # 2. 获取新闻 (缓存300s，含30条数据)
+            all_news = fetch_rss_news()
             
-            st.caption(f"Sources: Reuters • TechCrunch • CoinDesk | Next update in: {timer_str}")
-
-            # 3. 获取新闻 (带缓存，所以虽然每秒调用，但不会频繁请求API)
-            latest_news = fetch_rss_news()
-
-            if not latest_news:
+            # 3. 🔥 轮播逻辑 (Carousel)
+            # 每 15 秒轮换一次
+            rotation_interval = 15
+            current_timestamp = int(time.time())
+            
+            # 计算当前是第几批
+            # 假设每页显示 6 条 (3行 x 2列)
+            items_per_page = 6
+            total_items = len(all_news)
+            
+            if total_items == 0:
                 st.info("Scanning global feeds...")
                 return
 
-            # 4. 渲染双列新闻网格
-            rows = [latest_news[i:i+2] for i in range(0, len(latest_news), 2)]
+            # 使用取模运算实现无限循环轮播
+            batch_index = (current_timestamp // rotation_interval) % (total_items // items_per_page + 1)
+            start_idx = batch_index * items_per_page
+            end_idx = start_idx + items_per_page
+            
+            # 截取当前需要显示的新闻
+            visible_news = all_news[start_idx:end_idx]
+            
+            # 如果截取为空(刚好到底)，重置回第一批
+            if not visible_news:
+                visible_news = all_news[:items_per_page]
+
+            # 4. 轮播倒计时条 (Visual Progress Bar)
+            seconds_in_cycle = current_timestamp % rotation_interval
+            progress_pct = (seconds_in_cycle / rotation_interval) * 100
+            
+            st.markdown(f"""
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
+                <span style="font-size:0.7rem; color:#6b7280;">Auto-rotating feed ({start_idx+1}-{min(end_idx, total_items)} of {total_items})</span>
+            </div>
+            <div class="rotation-bar">
+                <div class="rotation-fill" style="width: {progress_pct}%;"></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # 5. 渲染新闻卡片 Grid
+            # 将 visible_news 分成每行2个
+            rows = [visible_news[i:i+2] for i in range(0, len(visible_news), 2)]
             
             for row in rows:
                 cols = st.columns(2)
@@ -501,10 +546,8 @@ if not st.session_state.messages:
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
-                            # 只有一个 Read Source 按钮
                             st.link_button("🔗 Read Source", news['link'], use_container_width=True)
 
-        # 调用这个局部刷新组件
         render_news_feed()
 
     # === RIGHT: The Truth Spectrum ===
@@ -548,7 +591,6 @@ if not st.session_state.messages:
             st.info("Markets are relatively calm.")
 
 # ================= 📊 5. ANALYSIS RESULT VIEW =================
-# 当有对话历史时，隐藏上面的仪表盘，显示分析结果
 if st.session_state.messages:
     st.markdown("---")
     
@@ -569,12 +611,8 @@ if st.session_state.messages:
     # 显示 AI 回复
     for msg in st.session_state.messages:
         if msg['role'] == 'assistant':
-            # 尝试提取 JSON 里的 Alpha Gap
             text = msg['content']
-            
-            # 清理 JSON 以便显示
             display_text = re.sub(r'```json.*?```', '', text, flags=re.DOTALL)
-            
             st.markdown(f"""
             <div class="analysis-card">
                 <div style="font-family:'Inter'; line-height:1.6; color:#d1d5db;">
@@ -582,20 +620,15 @@ if st.session_state.messages:
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            
-            # 可视化 Alpha Gap
             try:
                 json_match = re.search(r'```json\s*({.*?})\s*```', text, re.DOTALL)
                 if json_match and st.session_state.current_market:
                     data = json.loads(json_match.group(1))
                     ai_prob = data.get('ai_probability', 0.5)
-                    # 解析市场概率
                     m_prob_str = st.session_state.current_market['odds'].split(':')[-1].replace('%','').strip()
                     m_prob = float(m_prob_str)/100
-                    
                     gap = ai_prob - m_prob
                     color = "#ef4444" if abs(gap) > 0.2 else "#f59e0b"
-                    
                     st.markdown(f"""
                     <div style="margin-top:15px; padding:15px; background:rgba(0,0,0,0.3); border-radius:8px; border:1px solid {color};">
                         <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:5px;">
@@ -612,7 +645,6 @@ if st.session_state.messages:
                     """, unsafe_allow_html=True)
             except: pass
 
-    # 返回首页按钮
     if st.button("⬅️ Back to Dashboard"):
         st.session_state.messages = []
         st.rerun()
@@ -622,7 +654,6 @@ if not st.session_state.messages:
     st.markdown("---")
     st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:20px; letter-spacing:1px;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
-    # 第一行：中文/亚洲源
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1: st.link_button("🇨🇳 Jin10 (金十)", "https://www.jin10.com/", use_container_width=True)
     with c2: st.link_button("🇨🇳 WallstreetCN", "https://wallstreetcn.com/live/global", use_container_width=True)
@@ -632,7 +663,6 @@ if not st.session_state.messages:
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # 第二行：英文/全球源
     d1, d2, d3, d4, d5 = st.columns(5)
     with d1: st.link_button("🇺🇸 Bloomberg", "https://www.bloomberg.com/", use_container_width=True)
     with d2: st.link_button("🇬🇧 Reuters", "https://www.reuters.com/", use_container_width=True)
