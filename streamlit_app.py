@@ -55,6 +55,16 @@ for key, value in default_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
+# --- 🟢 新增：处理点击新闻的回调函数 ---
+# 这个函数必须定义在 UI 渲染之前，供 on_click 调用
+def trigger_analysis(news_title):
+    st.session_state.user_news_text = news_title
+    st.session_state.show_market_selection = False
+    st.session_state.current_market = None
+    st.session_state.is_processing = False 
+    # 这里我们只设置文本，让主界面的 if user_query 逻辑去处理后续的点击“Reality Check”
+    # 或者，如果想更自动，可以在这里设置一个标志位 auto_start=True
+
 # ================= 🎨 2. UI THEME (CSS) =================
 st.markdown("""
 <style>
@@ -73,7 +83,7 @@ st.markdown("""
     .hero-title {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
-        font-size: 3.5rem; /* 稍微调小一点，让出空间 */
+        font-size: 3.5rem; 
         color: #ffffff;
         text-align: center;
         letter-spacing: -2px;
@@ -196,7 +206,7 @@ def fetch_rss_news():
                     "link": entry.link
                 })
     except: pass
-    return news[:8] # Return top 8 mixed
+    return news[:9] # Return top 9 mixed
 
 # --- B. Market Logic (Categorized) ---
 @st.cache_data(ttl=60)
@@ -211,14 +221,14 @@ def fetch_categorized_markets():
             for event in resp:
                 try:
                     m = event.get('markets', [])[0]
-                    outcomes = json.loads(m.get('outcomes'))
-                    prices = json.loads(m.get('outcomePrices'))
+                    outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
+                    prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
                     
                     yes_price = 0
                     if "Yes" in outcomes:
                         yes_price = float(prices[outcomes.index("Yes")]) * 100
                     else:
-                        yes_price = float(max(prices)) * 100 # Categorical fallback
+                        yes_price = float(max([float(x) for x in prices])) * 100 # Categorical fallback
                     
                     market_obj = {
                         "title": event.get('title'),
@@ -257,7 +267,7 @@ def search_with_exa_optimized(user_text):
     markets = []
     try:
         exa = Exa(EXA_API_KEY)
-        resp = exa.search(f"prediction market about {keywords}", num_results=10, include_domains=["polymarket.com"])
+        resp = exa.search(f"prediction market about {keywords}", num_results=10, type="neural", include_domains=["polymarket.com"])
         seen = set()
         for r in resp.results:
             match = re.search(r'polymarket\.com/(?:event|market)/([^/]+)', r.url)
@@ -269,7 +279,9 @@ def search_with_exa_optimized(user_text):
                     data = requests.get(url).json()
                     if data:
                         m = data[0]['markets'][0]
-                        prices = json.loads(m['outcomePrices'])
+                        prices_raw = m['outcomePrices']
+                        prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
+                        
                         markets.append({
                             "title": data[0]['title'],
                             "odds": f"Yes: {float(prices[0])*100:.1f}%", # Simplified
@@ -338,7 +350,6 @@ st.markdown("""
     <p class="hero-subtitle">Narrative vs. Reality Engine</p>
 </div>
 <script>
-    /* ... (Existing JS animation code stays here) ... */
     const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     const element = document.getElementById("decrypt-title");
     const originalText = element.dataset.value;
@@ -390,24 +401,74 @@ st.markdown("<br>", unsafe_allow_html=True)
 if not st.session_state.messages:
     col_news, col_markets = st.columns([1, 1], gap="large")
 
-    # === LEFT: Live Noise Stream ===
+    # === LEFT: Live Noise Stream (Auto-Refreshing) ===
     with col_news:
-        st.markdown('<div class="section-header"><span style="color:#ef4444">📡 Live Narrative Stream</span> <span style="font-size:0.7rem; opacity:0.7">RSS FEED</span></div>', unsafe_allow_html=True)
-        
-        latest_news = fetch_rss_news()
-        for idx, news in enumerate(latest_news):
-            # 用一个看不见的按钮覆盖在每条新闻上，或者用 container
-            with st.container():
-                st.markdown(f"""
-                <div class="news-item">
-                    <div class="news-source">{news['source']}</div>
-                    <div class="news-headline">{news['title']}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                # 这种布局下，按钮最好放下面或者旁边，这里为了美观放个小按钮
-                if st.button("Check ➜", key=f"n_{idx}"):
-                    st.session_state.user_news_text = news['title']
-                    st.rerun()
+        # 顶部标题栏
+        st.markdown("""
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
+            <div style="font-size:0.9rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
+                <span style="color:#ef4444">📡 Live Narrative Stream</span>
+            </div>
+            <div style="font-size:0.7rem; color:#ef4444; animation: pulse 2s infinite;">
+                ● LIVE
+            </div>
+        </div>
+        <style>
+            @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
+        </style>
+        """, unsafe_allow_html=True)
+
+        # 🔥 核心修改：使用 st.fragment 实现局部自动刷新 (每60秒)
+        @st.fragment(run_every=60)
+        def render_news_feed():
+            # 获取最新新闻
+            latest_news = fetch_rss_news()
+            
+            # 显示更新时间戳
+            current_time = datetime.datetime.now().strftime("%H:%M:%S")
+            st.caption(f"Last updated: {current_time} (Auto-refreshing...)")
+
+            if not latest_news:
+                st.info("Scanning global feeds...")
+                return
+
+            for idx, news in enumerate(latest_news):
+                # 计算相对时间 (模拟) - 实际项目中可以解析 news['published']
+                time_ago = f"{idx * 15 + 2}m ago" 
+                
+                with st.container():
+                    # 纯 CSS 样式的卡片
+                    st.markdown(f"""
+                    <div style="
+                        padding: 12px;
+                        margin-bottom: 12px;
+                        background: rgba(255, 255, 255, 0.03);
+                        border-left: 3px solid #ef4444;
+                        border-radius: 6px;
+                        transition: all 0.2s;
+                    ">
+                        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:#9ca3af; margin-bottom:4px;">
+                            <span style="font-weight:bold; color:#ef4444;">{news['source']}</span>
+                            <span>{time_ago}</span>
+                        </div>
+                        <div style="font-size:0.95rem; color:#e5e7eb; font-weight:500; line-height:1.4;">
+                            {news['title']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # 🔥 修复按钮：使用 on_click 回调
+                    # key 必须唯一，use_container_width 让按钮铺满看起来整齐
+                    st.button(
+                        "⚡ Check Reality", 
+                        key=f"btn_check_{idx}", 
+                        on_click=trigger_analysis, # 调用上面的函数
+                        args=(news['title'],),     # 传参
+                        use_container_width=True
+                    )
+
+        # 调用这个局部刷新组件
+        render_news_feed()
 
     # === RIGHT: The Truth Spectrum ===
     with col_markets:
@@ -417,31 +478,37 @@ if not st.session_state.messages:
         
         # 1. Consensus Area (Green)
         st.caption("🏛️ High Certainty (Market Consensus)")
-        for m in market_cats['consensus']:
-            st.markdown(f"""
-            <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                <div class="market-mini-card">
-                    <div class="market-title">{m['title']}</div>
-                    <div class="market-bar-bg"><div class="market-bar-fill" style="width:{m['yes']}%; background:#10b981;"></div></div>
-                    <div class="market-meta"><span>Likelihood</span> <span>{m['yes']}%</span></div>
-                </div>
-            </a>
-            """, unsafe_allow_html=True)
+        if market_cats['consensus']:
+            for m in market_cats['consensus']:
+                st.markdown(f"""
+                <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
+                    <div class="market-mini-card">
+                        <div class="market-title">{m['title']}</div>
+                        <div class="market-bar-bg"><div class="market-bar-fill" style="width:{m['yes']}%; background:#10b981;"></div></div>
+                        <div class="market-meta"><span>Likelihood</span> <span>{m['yes']}%</span></div>
+                    </div>
+                </a>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No strong consensus markets right now.")
             
         st.markdown("<br>", unsafe_allow_html=True)
         
         # 2. Battleground Area (Yellow/Orange)
         st.caption("⚡ Active Battleground (High Uncertainty)")
-        for m in market_cats['battleground']:
-            st.markdown(f"""
-            <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
-                <div class="market-mini-card battleground">
-                    <div class="market-title">{m['title']}</div>
-                    <div class="market-bar-bg"><div class="market-bar-fill" style="width:{m['yes']}%; background:#f59e0b;"></div></div>
-                    <div class="market-meta"><span>Likelihood</span> <span>{m['yes']}%</span></div>
-                </div>
-            </a>
-            """, unsafe_allow_html=True)
+        if market_cats['battleground']:
+            for m in market_cats['battleground']:
+                st.markdown(f"""
+                <a href="https://polymarket.com/event/{m['slug']}" target="_blank" style="text-decoration:none;">
+                    <div class="market-mini-card battleground">
+                        <div class="market-title">{m['title']}</div>
+                        <div class="market-bar-bg"><div class="market-bar-fill" style="width:{m['yes']}%; background:#f59e0b;"></div></div>
+                        <div class="market-meta"><span>Likelihood</span> <span>{m['yes']}%</span></div>
+                    </div>
+                </a>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("Markets are relatively calm.")
 
 # ================= 📊 5. ANALYSIS RESULT VIEW =================
 # 当有对话历史时，隐藏上面的仪表盘，显示分析结果
