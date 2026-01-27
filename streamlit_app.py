@@ -52,8 +52,8 @@ st.set_page_config(
 default_state = {
     "messages": [],
     "current_market": None,
-    "search_candidates": [],     # Stores list of found markets
-    "search_stage": "input",     # input -> selection -> analysis
+    "search_candidates": [],
+    "search_stage": "input",
     "user_news_text": "",
     "is_processing": False,
     "last_user_input": "",
@@ -250,6 +250,14 @@ st.markdown("""
         border-radius: 12px;
         padding: 20px;
         margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    
+    /* Chat Input styling */
+    .stChatInput input {
+        background-color: rgba(20, 0, 0, 0.6) !important;
+        color: white !important;
+        border: 1px solid #7f1d1d !important;
     }
 
     /* Hub Button */
@@ -310,10 +318,6 @@ st.markdown("""
         border-color: #ef4444;
         transform: translateY(-2px);
     }
-    .ex-link {
-        font-size: 0.7rem; color: #6b7280; text-decoration: none; margin-top: 5px; display: block; text-align: right;
-    }
-    .ex-link:hover { color: #ef4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -400,12 +404,10 @@ def fetch_categorized_news_v2():
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
     try:
-        # 1. Fetch more items to allow for filtering (settled/sensitive)
         url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
-        # 敏感词过滤 (Sensitive Keywords)
         SENSITIVE_KEYWORDS = [
             "china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", 
             "hong kong", "communist", "pla", "scs", "south china sea"
@@ -417,19 +419,14 @@ def fetch_polymarket_v5_simple(limit=60):
                     title = event.get('title', 'Untitled').strip()
                     if not title: continue
                     
-                    # 1. 敏感词过滤 (Case insensitive)
                     title_lower = title.lower()
                     if any(kw in title_lower for kw in SENSITIVE_KEYWORDS):
                         continue
 
-                    # 2. 状态过滤
                     if event.get('closed') is True: continue
-                    
                     if not event.get('markets'): continue
                     m = event['markets'][0]
                     vol = float(m.get('volume', 0))
-                    
-                    # 3. 过滤极低交易量 (死盘)
                     if vol < 1000: continue
                     
                     if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
@@ -448,7 +445,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (Deep Analysis v14.0) ---
+# --- 🔥 D. NEW AGENT LOGIC (List Selection + Bilingual + Chat Memory + Links) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -458,46 +455,37 @@ def generate_keywords(user_text):
     except: return user_text
 
 def search_market_data_list(user_query):
-    """Search Polymarket and return A LIST of candidates."""
     if not EXA_AVAILABLE or not EXA_API_KEY: return []
-    
     candidates = []
     try:
         exa = Exa(EXA_API_KEY)
         keywords = generate_keywords(user_query)
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=5, # Get top 5 matches
+            num_results=5,
             type="neural",
             include_domains=["polymarket.com"]
         )
-        
         for result in search_resp.results:
             match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
             if match:
                 slug = match.group(1)
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                 data = requests.get(api_url, timeout=5).json()
-                
                 if data and isinstance(data, list):
                     event = data[0]
                     m = event['markets'][0]
-                    
-                    # Filter sensitive in search results too
-                    title_lower = event['title'].lower()
-                    if any(kw in title_lower for kw in ["china", "xi jinping", "taiwan"]):
-                        continue
+                    # Filter sensitive
+                    if any(kw in event['title'].lower() for kw in ["china", "xi jinping", "taiwan"]): continue
 
                     outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
                     vol = float(m.get('volume', 0))
-                    
                     odds_str = []
                     for i, out in enumerate(outcomes):
                         if i < len(prices):
                             prob = float(prices[i]) * 100
                             odds_str.append(f"{out}: {prob:.1f}%")
-                    
                     candidates.append({
                         "title": event['title'],
                         "odds": " | ".join(odds_str[:4]),
@@ -509,124 +497,97 @@ def search_market_data_list(user_query):
     return candidates
 
 def is_chinese_input(text):
-    """Detect if input text contains Chinese characters."""
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
-def analyze_with_agent(user_news, market_data):
+def get_agent_response(history, market_data):
+    """
+    Handles the full chat conversation with memory and context.
+    """
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    is_cn = is_chinese_input(user_news)
+    
+    # Use the first user message to detect language and context
+    first_query = history[0]['parts'][0] if history else ""
+    is_cn = is_chinese_input(first_query)
     
     # 1. Market Context Construction
     if market_data:
-        market_instruction_cn = f"""
-        ✅ **已关联 Polymarket 预测市场**
-        - **市场问题:** {market_data['title']}
-        - **当前赔率:** {market_data['odds']}
-        - **总交易量:** {market_data['volume']}
-        
-        **分析要求:** 1. 必须根据上述赔率计算【市场置信度 (Confidence Level)】。
-        2. 给出一个具体的【建议持仓时长 (Holding Duration)】（例如：事件落地前卖出/持有至202X年）。
-        3. 对比新闻情绪与市场资金流向是否背离。
-        """
-        market_instruction_en = f"""
-        ✅ **POLYMARKET DATA FOUND**
-        - **Market:** {market_data['title']}
-        - **Odds:** {market_data['odds']}
-        - **Volume:** {market_data['volume']}
-        
-        **REQUIREMENT:** 1. Calculate Market Confidence based on these odds.
-        2. Suggest a specific **Holding Duration** (e.g. Sell on news / Hold til event).
-        3. Analyze divergence between news hype and real money bets.
-        """
+        if is_cn:
+            market_context = f"""
+            ✅ **已关联 Polymarket 预测市场**
+            - **市场问题:** {market_data['title']}
+            - **当前赔率:** {market_data['odds']}
+            - **总交易量:** {market_data['volume']}
+            
+            **指令:** 1. 根据赔率计算【市场置信度】。2. 建议持仓时长。3. 对比新闻情绪与资金流向。
+            """
+        else:
+            market_context = f"""
+            ✅ **POLYMARKET DATA FOUND**
+            - **Market:** {market_data['title']}
+            - **Odds:** {market_data['odds']}
+            - **Volume:** {market_data['volume']}
+            
+            **INSTRUCTION:** 1. Calc Confidence. 2. Suggest Holding Duration. 3. Compare hype vs money.
+            """
     else:
-        market_instruction_cn = "❌ **未找到对应预测市场**。请重点分析股票、基金或加密货币的交易机会。"
-        market_instruction_en = "❌ **NO DIRECT PREDICTION MARKET**. Focus heavily on Equities, ETFs, or Crypto opportunities."
+        if is_cn:
+            market_context = "❌ **未找到对应预测市场**。请重点分析股票、基金或加密货币的交易机会。"
+        else:
+            market_context = "❌ **NO DIRECT PREDICTION MARKET**. Focus on Equities/Crypto opportunities."
 
-    # 2. System Prompt Selection
+    # 2. System Prompt Selection (Includes Link Instruction)
     if is_cn:
         system_prompt = f"""
         你是一位拥有20年经验的【全球宏观策略师】兼【普通市民财富顾问】。
         当前日期: {current_date}
         
-        **任务目标:** 对用户输入的新闻进行全方位深度解析，既要有机构视角的专业度，也要有对普通人的实际生活/理财建议。
+        **核心规则:**
+        1. **深度分析:** 结合机构视角与普通人生活建议。
+        2. **强制链接:** 当提到具体的股票、加密货币或关键机构时，**必须**使用 Markdown 生成超链接。
+           - 股票 (如 NVDA): `[NVDA](https://finance.yahoo.com/quote/NVDA)`
+           - 加密货币 (如 BTC): `[BTC](https://www.binance.com/en/trade/BTC_USDT)`
+           - A股: 使用相关财经网站链接。
+        3. **追问记忆:** 你正在与用户对话，请记住之前的分析内容。
         
-        {market_instruction_cn}
+        {market_context}
         
-        --- 深度分析框架 (必须严格遵循) ---
-        
+        --- 初始分析框架 (仅用于第一轮回答) ---
         ### 1. 📰 新闻背景与核心事实
-        * **事件还原**: 用简练的语言概括发生了什么（去噪）。
-        * **核心脉络**: 为什么这件事现在很重要？它的历史背景是什么？
-        
-        ### 2. 🌪️ 多维影响深度拆解
-        * **🎯 本行业冲击**: 直接受影响的公司、供应链或技术路线。
-        * **🕸️ 跨行业连锁反应**: 蝴蝶效应（例如：石油涨价 -> 物流成本 -> 食品通胀）。
-        * **🏦 宏观与金融市场**: 对股市大盘、利率、汇率或市场风险偏好（Risk-on/off）的影响。
-        * **🧑‍💼 对普通市民的影响 (关键)**: 
-            * *生活成本*: 会变贵吗？
-            * *就业环境*: 行业会裁员还是招人？
-            * *普通人应对*: 需要囤货、换汇或调整房贷策略吗？
-        
+        ### 2. 🌪️ 多维影响 (行业/宏观/普通人)
         ### 3. 💰 投资与交易建议 (实操干货)
-        *(如果上方有 Polymarket 数据，请优先分析其赔率机会)*
-        * **🎲 预测市场策略 (如有)**:
-            * *置信度*: 高/中/低
-            * *操作*: 做多 Yes 还是 No？
-            * *时长*: 短线博弈还是长线持有？
-        * **📈 资本市场机会**:
-            * *股票/ETF*: 具体代码 (如 NVDA, 510300.SH)。*看多逻辑简述*。
-            * *加密货币*: 相关代币。
-            * *避坑指南*: 哪些资产可能暴雷？
-            
         ### 4. 🏁 总结
-        * 一句话总结核心观点。
         """
     else:
         system_prompt = f"""
         You are a seasoned **Global Macro Strategist** and **Personal Wealth Advisor**.
         Current Date: {current_date}
         
-        **MISSION:** Provide a deep, multi-layered analysis of the news. Balance institutional-grade depth with practical advice for the everyday citizen.
+        **CORE RULES:**
+        1. **Deep Dive:** Balance institutional depth with practical life advice.
+        2. **SMART LINKS:** When mentioning specific Tickers (Stocks/Crypto), **YOU MUST** provide a Markdown link.
+           - Stocks: `[TSLA](https://finance.yahoo.com/quote/TSLA)`
+           - Crypto: `[ETH](https://www.binance.com/en/trade/ETH_USDT)`
+        3. **Memory:** Maintain context for follow-up questions.
         
-        {market_instruction_en}
+        {market_context}
         
-        --- ANALYSIS FRAMEWORK ---
-        
-        ### 1. 📰 Context & Core Facts
-        * **De-noise**: What actually happened?
-        * **Context**: Why does this matter *now*?
-        
-        ### 2. 🌪️ Multi-Dimensional Impact
-        * **🎯 Industry Impact**: Direct hits to companies/supply chains.
-        * **🕸️ Ripple Effects**: Indirect consequences on other sectors.
-        * **🏦 Macro & Financials**: Impact on broad markets, rates, or FX.
-        * **🧑‍💼 Citizen's Perspective (Crucial)**: 
-            * *Cost of Living*: Inflation risks?
-            * *Jobs*: Hiring or layoffs?
-            * *Actionable Life Advice*: Should they refinance? Save? Buy?
-            
-        ### 3. 💰 Investment & Trading Strategy
-        *(If Polymarket data exists above, prioritize analyzing it)*
-        * **🎲 Prediction Market Strategy (If applicable)**:
-            * *Confidence*: High/Med/Low
-            * *Trade*: Bet Yes or No?
-            * *Duration*: Hold duration?
-        * **📈 Capital Markets**:
-            * *Stocks/ETFs*: Specific Tickers (e.g., TSLA, SPY). *Bullish/Bearish rationale.*
-            * *Crypto*: Relevant tokens.
-            * *Risk Warning*: Assets to avoid.
-            
+        --- INITIAL FRAMEWORK (For first response) ---
+        ### 1. 📰 Context & Facts
+        ### 2. 🌪️ Multi-Dimensional Impact (Industry/Macro/Citizen)
+        ### 3. 💰 Investment Strategy (Alpha)
         ### 4. 🏁 Summary
-        * One sentence bottom line.
         """
     
-    messages = [
-        {"role": "user", "parts": [system_prompt]},
-        {"role": "user", "parts": [f"News Input: {user_news}"]}
-    ]
+    # Construct full history for API
+    api_messages = [{"role": "user", "parts": [system_prompt]}]
+    for msg in history:
+        # Map app roles to Gemini roles
+        role = "user" if msg['role'] == "user" else "model"
+        api_messages.append({"role": role, "parts": [msg['content']]})
+        
     try:
-        response = model.generate_content(messages)
+        response = model.generate_content(api_messages)
         return response.text
     except Exception as e:
         return f"Agent Analysis Failed: {str(e)}"
@@ -640,12 +601,12 @@ st.markdown('<div class="hero-subtitle">Narrative vs. Reality Engine</div>', uns
 # --- Search Bar & Workflow ---
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
-    # State reset logic when input changes
     def on_input_change():
         st.session_state.search_stage = "input"
         st.session_state.search_candidates = []
         
     input_val = st.session_state.get("user_news_text", "")
+    # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
     user_query = st.text_area("Analyze News", value=input_val, height=70, 
                               placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
                               label_visibility="collapsed",
@@ -654,8 +615,8 @@ with s_mid:
     # === Step 1: SEARCH Button ===
     if st.session_state.search_stage == "input":
         if st.button("🔍 Search Markets", use_container_width=True):
-            if st.session_state.news_input_box: # Use key value
-                st.session_state.user_news_text = st.session_state.news_input_box # Sync
+            if st.session_state.news_input_box:
+                st.session_state.user_news_text = st.session_state.news_input_box
                 with st.spinner("🕵️‍♂️ Hunting for prediction markets..."):
                     candidates = search_market_data_list(st.session_state.user_news_text)
                     st.session_state.search_candidates = candidates
@@ -665,11 +626,8 @@ with s_mid:
     # === Step 2: SELECTION List ===
     elif st.session_state.search_stage == "selection":
         st.markdown("##### 🧐 Select a Market to Reality Check:")
-        
-        # Option A: List found markets
         if st.session_state.search_candidates:
             for idx, m in enumerate(st.session_state.search_candidates):
-                # Using columns to make it look like a list item
                 c1, c2 = st.columns([4, 1])
                 with c1:
                     st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['volume']})")
@@ -677,35 +635,38 @@ with s_mid:
                     if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
                         st.session_state.search_stage = "analysis"
+                        # Prepare initial message history
+                        st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
                         st.rerun()
         else:
             st.warning("No direct markets found.")
 
-        # Option B: Direct Analysis (Skip)
         st.markdown("---")
         if st.button("📝 Analyze News Only (No Market)", use_container_width=True):
             st.session_state.current_market = None
             st.session_state.search_stage = "analysis"
+            st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
             st.rerun()
             
-        # Reset button
         if st.button("⬅️ Start Over"):
             st.session_state.search_stage = "input"
             st.rerun()
 
-    # === Step 3: ANALYSIS Execution ===
+    # === Step 3: ANALYSIS Execution (Initial Run) ===
     elif st.session_state.search_stage == "analysis":
-        if not st.session_state.messages: # Run only if empty
+        # If the last message is from user, generate response
+        if st.session_state.messages and st.session_state.messages[-1]['role'] == 'user':
             with st.spinner("🧠 Generating Alpha Signals..."):
-                analysis_text = analyze_with_agent(st.session_state.user_news_text, st.session_state.current_market)
-                st.session_state.messages.append({"role": "assistant", "content": analysis_text})
-                st.session_state.is_processing = False
+                response_text = get_agent_response(st.session_state.messages, st.session_state.current_market)
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                st.rerun() # Rerun to display the new message in the chat loop below
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Display Analysis if ready
-if st.session_state.messages:
-    # 1. Market Data Card (If Selected)
+# === DISPLAY ANALYSIS & CHAT (Interactive Mode) ===
+if st.session_state.messages and st.session_state.search_stage == "analysis":
+    
+    # 1. Market Data Context Card (Always visible at top)
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -726,12 +687,25 @@ if st.session_state.messages:
         </div>
         """, unsafe_allow_html=True)
 
-    # 2. AI Analysis Content
+    # 2. Chat History
     for msg in st.session_state.messages:
-        if msg['role'] == 'assistant':
-            st.markdown(f"<div class='analysis-card'>{msg['content']}</div>", unsafe_allow_html=True)
-            
-    if st.button("⬅️ New Analysis"):
+        # Skip the very first "Analyze this news..." system-like user prompt if desired, 
+        # or display it. Displaying it helps context.
+        if msg['role'] == 'user':
+            with st.chat_message("user"):
+                st.write(msg['content'].replace("Analyze this news: ", "News: "))
+        else:
+            with st.chat_message("assistant"):
+                st.markdown(msg['content'])
+
+    # 3. Chat Input (Follow-up)
+    if prompt := st.chat_input("Ask a follow-up question (e.g. 'What about Tesla?')..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.rerun()
+
+    # Back Button
+    st.markdown("---")
+    if st.button("⬅️ Start New Analysis"):
         st.session_state.messages = []
         st.session_state.search_stage = "input"
         st.rerun()
@@ -836,7 +810,6 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
         if sc1.button("💵 Volume", use_container_width=True): st.session_state.market_sort = "volume"
         if sc2.button("🔥 Activity", use_container_width=True): st.session_state.market_sort = "active"
         
-        # 🔥 UPDATED: Request 60 items
         markets = fetch_polymarket_v5_simple(60)
         
         if markets:
