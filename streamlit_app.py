@@ -534,6 +534,61 @@ def fetch_google_trends():
     
     return trends
 
+# --- 🔥 C. Crypto Prices (Binance API) ---
+@st.cache_data(ttl=60)
+def fetch_crypto_prices():
+    """获取主流加密货币实时价格（币安API）"""
+    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT"]
+    crypto_data = []
+    
+    try:
+        url = "https://api.binance.com/api/v3/ticker/24hr"
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            all_tickers = response.json()
+            
+            for ticker in all_tickers:
+                if ticker['symbol'] in symbols:
+                    symbol_clean = ticker['symbol'].replace('USDT', '')
+                    price = float(ticker['lastPrice'])
+                    change_24h = float(ticker['priceChangePercent'])
+                    volume = float(ticker['volume'])
+                    
+                    # 格式化价格
+                    if price >= 1000:
+                        price_str = f"${price:,.0f}"
+                    elif price >= 1:
+                        price_str = f"${price:,.2f}"
+                    else:
+                        price_str = f"${price:.4f}"
+                    
+                    # 格式化交易量
+                    if volume >= 1000000:
+                        vol_str = f"{volume/1000000:.1f}M"
+                    elif volume >= 1000:
+                        vol_str = f"{volume/1000:.1f}K"
+                    else:
+                        vol_str = f"{volume:.0f}"
+                    
+                    crypto_data.append({
+                        "symbol": symbol_clean,
+                        "price": price_str,
+                        "change": change_24h,
+                        "volume": vol_str,
+                        "trend": "up" if change_24h > 0 else "down"
+                    })
+    except:
+        # 备用数据
+        crypto_data = [
+            {"symbol": "BTC", "price": "$94,250", "change": 2.3, "volume": "25.5B", "trend": "up"},
+            {"symbol": "ETH", "price": "$3,421", "change": -1.2, "volume": "12.3B", "trend": "down"},
+            {"symbol": "BNB", "price": "$612", "change": 0.8, "volume": "1.2B", "trend": "up"},
+            {"symbol": "SOL", "price": "$145", "change": 3.5, "volume": "2.1B", "trend": "up"},
+        ]
+    
+    return crypto_data[:8]  # 返回前8个
+
 # --- 🔥 C. Polymarket - 全球排名 + 双列 + 交易量排序 ---
 @st.cache_data(ttl=120)
 def fetch_top_polymarkets(sort_by="volume", limit=20):
@@ -763,64 +818,42 @@ st.markdown("""
 
 # --- 4.1.5 Global Time Clock ---
 now_utc = datetime.datetime.now(datetime.timezone.utc)
-times = {
-    "NYC": {
-        "time": (now_utc - datetime.timedelta(hours=5)).strftime("%H:%M"),
-        "emoji": "🗽",
-        "label": "New York"
-    },
-    "LON": {
-        "time": now_utc.strftime("%H:%M"),
-        "emoji": "🇬🇧",
-        "label": "London"
-    },
-    "ABD": {
-        "time": (now_utc + datetime.timedelta(hours=4)).strftime("%H:%M"),
-        "emoji": "🕌",
-        "label": "Abu Dhabi"
-    },
-    "BJS": {
-        "time": (now_utc + datetime.timedelta(hours=8)).strftime("%H:%M"),
-        "emoji": "🇨🇳",
-        "label": "Beijing"
-    }
-}
 
 st.markdown(f"""
 <div style="
     display: flex; 
     justify-content: center; 
-    gap: 30px; 
-    margin: 20px auto 30px auto;
-    padding: 15px;
+    gap: 20px; 
+    margin: 15px auto 25px auto;
+    padding: 12px;
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(220, 38, 38, 0.2);
-    border-radius: 12px;
-    max-width: 900px;
+    border-radius: 10px;
+    max-width: 800px;
     flex-wrap: wrap;
 ">
-    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
-        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['NYC']['emoji']}</span>
-        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['NYC']['label']}</span>
-        <span style="color: #ef4444; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['NYC']['time']}</span>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
+        <span style="font-size: 1.2rem; margin-bottom: 3px;">🗽</span>
+        <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">New York</span>
+        <span style="color: #ef4444; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{(now_utc - datetime.timedelta(hours=5)).strftime("%H:%M")}</span>
     </div>
     
-    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
-        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['LON']['emoji']}</span>
-        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['LON']['label']}</span>
-        <span style="color: #fbbf24; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['LON']['time']}</span>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
+        <span style="font-size: 1.2rem; margin-bottom: 3px;">🇬🇧</span>
+        <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">London</span>
+        <span style="color: #fbbf24; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{now_utc.strftime("%H:%M")}</span>
     </div>
     
-    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
-        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['ABD']['emoji']}</span>
-        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['ABD']['label']}</span>
-        <span style="color: #10b981; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['ABD']['time']}</span>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
+        <span style="font-size: 1.2rem; margin-bottom: 3px;">🕌</span>
+        <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">Abu Dhabi</span>
+        <span style="color: #10b981; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{(now_utc + datetime.timedelta(hours=4)).strftime("%H:%M")}</span>
     </div>
     
-    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
-        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['BJS']['emoji']}</span>
-        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['BJS']['label']}</span>
-        <span style="color: #3b82f6; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['BJS']['time']}</span>
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
+        <span style="font-size: 1.2rem; margin-bottom: 3px;">🇨🇳</span>
+        <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">Beijing</span>
+        <span style="color: #3b82f6; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{(now_utc + datetime.timedelta(hours=8)).strftime("%H:%M")}</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -886,32 +919,42 @@ if not st.session_state.messages:
         </style>
         """, unsafe_allow_html=True)
         
-        # Google Trends
+        # 全球趋势按钮 (替代 Google Trends)
         st.markdown("""
         <div style="display:flex; align-items:center; justify-content:center; margin:15px 0 10px 0; gap:8px;">
-            <span style="font-size:1rem;">📈</span>
-            <span style="font-weight:700; color:#ef4444; letter-spacing:1px; font-size:0.8rem;">TRENDING NOW</span>
+            <span style="font-size:1rem;">🌍</span>
+            <span style="font-weight:700; color:#ef4444; letter-spacing:1px; font-size:0.8rem;">GLOBAL TRENDS</span>
         </div>
         """, unsafe_allow_html=True)
         
-        trends = fetch_google_trends()
+        trend_links = [
+            {"name": "Google Trends", "url": "https://trends.google.com/trending?geo=US", "icon": "🔍"},
+            {"name": "Bloomberg", "url": "https://www.bloomberg.com/trending", "icon": "📊"},
+            {"name": "Twitter/X", "url": "https://twitter.com/explore", "icon": "🐦"},
+            {"name": "Reddit", "url": "https://www.reddit.com/r/all/", "icon": "🤖"},
+            {"name": "HackerNews", "url": "https://news.ycombinator.com/", "icon": "🧡"}
+        ]
         
-        # 使用 columns 布局来显示 trends，避免 HTML 渲染问题
-        if trends:
-            # 每行最多 5 个标签
-            rows = [trends[i:i+5] for i in range(0, len(trends), 5)]
-            for row in rows:
-                cols = st.columns(len(row))
-                for idx, t in enumerate(row):
-                    with cols[idx]:
-                        heat_class = f"trend-{t['heat']}"
-                        encoded = urllib.parse.quote(t['name'])
-                        st.markdown(f"""
-                        <a href="https://www.google.com/search?q={encoded}" target="_blank" class="trend-tag {heat_class}">
-                            {t['name']}
-                            <span class="trend-vol">{t['vol']}</span>
-                        </a>
-                        """, unsafe_allow_html=True)
+        cols = st.columns(5)
+        for idx, link in enumerate(trend_links):
+            with cols[idx]:
+                st.markdown(f"""
+                <a href="{link['url']}" target="_blank" style="text-decoration: none;">
+                    <div style="
+                        background: rgba(220, 38, 38, 0.1);
+                        border: 1px solid rgba(220, 38, 38, 0.3);
+                        border-radius: 8px;
+                        padding: 10px;
+                        text-align: center;
+                        transition: all 0.3s;
+                        cursor: pointer;
+                    " onmouseover="this.style.background='rgba(220, 38, 38, 0.2)'; this.style.borderColor='#ef4444';" 
+                       onmouseout="this.style.background='rgba(220, 38, 38, 0.1)'; this.style.borderColor='rgba(220, 38, 38, 0.3)';">
+                        <div style="font-size: 1.5rem; margin-bottom: 5px;">{link['icon']}</div>
+                        <div style="color: #fca5a5; font-size: 0.75rem; font-weight: 600;">{link['name']}</div>
+                    </div>
+                </a>
+                """, unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -929,17 +972,62 @@ if not st.session_state.messages:
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Fetch & Display News
+        # Fetch & Display News OR Crypto Prices
         all_news = fetch_categorized_news()
         
-        if st.session_state.news_category == "all":
-            display_news = []
-            # 从每个分类取更多新闻
-            for cat in ["politics", "web3", "tech", "general"]:
-                display_news.extend(all_news[cat][:10])  # 每个分类10条
-        else:
-            display_news = all_news[st.session_state.news_category][:30]  # 单个分类30条
+        # 特殊处理 Web3 分类 - 显示加密货币价格
+        if st.session_state.news_category == "web3":
+            st.markdown("""
+            <div style="text-align: center; margin: 20px 0 15px 0;">
+                <span style="font-size: 1.5rem;">₿</span>
+                <span style="color: #ef4444; font-weight: 700; font-size: 1rem; margin-left: 8px;">CRYPTO MARKET LIVE</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            crypto_prices = fetch_crypto_prices()
+            
+            if crypto_prices:
+                # 双列显示加密货币
+                rows = [crypto_prices[i:i+2] for i in range(0, len(crypto_prices), 2)]
+                for row in rows:
+                    cols = st.columns(2)
+                    for idx, crypto in enumerate(row):
+                        with cols[idx]:
+                            change_color = "#10b981" if crypto['trend'] == "up" else "#ef4444"
+                            arrow = "↗" if crypto['trend'] == "up" else "↘"
+                            
+                            st.markdown(f"""
+                            <div style="
+                                background: rgba(0, 0, 0, 0.4);
+                                border: 1px solid rgba(255, 255, 255, 0.1);
+                                border-left: 3px solid {change_color};
+                                border-radius: 8px;
+                                padding: 15px;
+                                margin-bottom: 10px;
+                            ">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <span style="color: #e5e7eb; font-size: 1.1rem; font-weight: 700;">{crypto['symbol']}</span>
+                                    <span style="color: {change_color}; font-size: 0.9rem; font-weight: 600;">{arrow} {crypto['change']:.2f}%</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="color: #fbbf24; font-size: 1.3rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{crypto['price']}</span>
+                                    <span style="color: #9ca3af; font-size: 0.75rem;">Vol: {crypto['volume']}</span>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+            else:
+                st.info("Loading crypto prices...")
         
+        # 其他分类显示新闻
+        else:
+            if st.session_state.news_category == "all":
+                display_news = []
+                # 从每个分类取更多新闻
+                for cat in ["politics", "tech", "general"]:  # 移除 web3
+                    display_news.extend(all_news[cat][:10])  # 每个分类10条
+            else:
+                display_news = all_news[st.session_state.news_category][:30]  # 单个分类30条
+            
         if display_news:
             rows = [display_news[i:i+2] for i in range(0, min(len(display_news), 12), 2)]
             for row in rows:
@@ -967,7 +1055,8 @@ if not st.session_state.messages:
                         </a>
                         """, unsafe_allow_html=True)
         else:
-            st.info("No recent news in this category. Try another category.")
+            if st.session_state.news_category != "web3":  # 只在非web3时显示"没有新闻"
+                st.info("No recent news in this category. Try another category.")
     
     # RIGHT: Polymarket
     with col_markets:
