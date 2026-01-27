@@ -318,6 +318,10 @@ st.markdown("""
         border-color: #ef4444;
         transform: translateY(-2px);
     }
+    .ex-link {
+        font-size: 0.7rem; color: #6b7280; text-decoration: none; margin-top: 5px; display: block; text-align: right;
+    }
+    .ex-link:hover { color: #ef4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -507,7 +511,8 @@ def get_agent_response(history, market_data):
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
     # Use the first user message to detect language and context
-    first_query = history[0]['parts'][0] if history else ""
+    # FIX: Use 'content' instead of 'parts' to access user message text
+    first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
     # 1. Market Context Construction
@@ -606,7 +611,6 @@ with s_mid:
         st.session_state.search_candidates = []
         
     input_val = st.session_state.get("user_news_text", "")
-    # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
     user_query = st.text_area("Analyze News", value=input_val, height=70, 
                               placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
                               label_visibility="collapsed",
@@ -635,7 +639,6 @@ with s_mid:
                     if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
                         st.session_state.search_stage = "analysis"
-                        # Prepare initial message history
                         st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
                         st.rerun()
         else:
@@ -654,19 +657,17 @@ with s_mid:
 
     # === Step 3: ANALYSIS Execution (Initial Run) ===
     elif st.session_state.search_stage == "analysis":
-        # If the last message is from user, generate response
         if st.session_state.messages and st.session_state.messages[-1]['role'] == 'user':
             with st.spinner("🧠 Generating Alpha Signals..."):
                 response_text = get_agent_response(st.session_state.messages, st.session_state.current_market)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
-                st.rerun() # Rerun to display the new message in the chat loop below
+                st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # === DISPLAY ANALYSIS & CHAT (Interactive Mode) ===
 if st.session_state.messages and st.session_state.search_stage == "analysis":
     
-    # 1. Market Data Context Card (Always visible at top)
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -687,10 +688,8 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
         </div>
         """, unsafe_allow_html=True)
 
-    # 2. Chat History
+    # Chat History
     for msg in st.session_state.messages:
-        # Skip the very first "Analyze this news..." system-like user prompt if desired, 
-        # or display it. Displaying it helps context.
         if msg['role'] == 'user':
             with st.chat_message("user"):
                 st.write(msg['content'].replace("Analyze this news: ", "News: "))
@@ -698,12 +697,11 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
             with st.chat_message("assistant"):
                 st.markdown(msg['content'])
 
-    # 3. Chat Input (Follow-up)
+    # Chat Input
     if prompt := st.chat_input("Ask a follow-up question (e.g. 'What about Tesla?')..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # Back Button
     st.markdown("---")
     if st.button("⬅️ Start New Analysis"):
         st.session_state.messages = []
