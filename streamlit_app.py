@@ -549,7 +549,7 @@ def analyze_with_agent(user_news, market_data):
 # ================= 🖥️ 6. MAIN LAYOUT =================
 
 # --- Header ---
-st.markdown('<div class="hero-title">Be Holmes</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">Holmes Global News</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-subtitle">Narrative vs. Reality Engine</div>', unsafe_allow_html=True)
 
 # --- Search Bar ---
@@ -558,7 +558,7 @@ with s_mid:
     input_val = st.session_state.get("user_news_text", "")
     user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", label_visibility="collapsed")
     
-    if st.button("⚖️ Reality Check", use_container_width=True):
+    if st.button("Begin Analysis", use_container_width=True):
         if user_query:
             st.session_state.is_processing = True
             st.session_state.messages = [] 
@@ -755,3 +755,4 @@ if not st.session_state.messages:
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
+
