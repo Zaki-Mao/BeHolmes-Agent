@@ -363,16 +363,19 @@ st.markdown("""
 # --- 🔥 A. News Logic - 分类支持 (只显示24h内) ---
 @st.cache_data(ttl=300)
 def fetch_categorized_news():
-    """获取分类新闻，只保留24小时内的"""
+    """获取分类新闻，只保留24小时内的，增加数量"""
     all_news = {"politics": [], "web3": [], "tech": [], "general": []}
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     cutoff_time = now_utc - datetime.timedelta(hours=24)
     
-    # 关键词映射
+    # 关键词映射 - 扩展关键词以获取更多相关新闻
     categories_keywords = {
-        "politics": ["election", "government", "congress", "senate", "president", "policy", "vote", "democrat", "republican"],
-        "web3": ["crypto", "bitcoin", "ethereum", "blockchain", "nft", "defi", "web3", "token", "binance"],
-        "tech": ["ai", "artificial intelligence", "tech", "apple", "google", "microsoft", "startup", "software", "hardware"]
+        "politics": ["election", "government", "congress", "senate", "president", "policy", "vote", 
+                     "democrat", "republican", "political", "minister", "parliament", "diplomacy"],
+        "web3": ["crypto", "bitcoin", "ethereum", "blockchain", "nft", "defi", "web3", "token", 
+                 "binance", "coinbase", "metamask", "solana", "polygon", "dogecoin"],
+        "tech": ["ai", "artificial intelligence", "tech", "apple", "google", "microsoft", "startup", 
+                 "software", "hardware", "openai", "meta", "amazon", "tesla", "spacex", "nvidia"]
     }
     
     def categorize_news(title):
@@ -390,54 +393,60 @@ def fetch_categorized_news():
         except:
             return False
     
-    # 1. NewsAPI
+    # 1. NewsAPI - 增加获取数量
     if NEWS_API_KEY:
         try:
-            url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=100&apiKey={NEWS_API_KEY}"
-            response = requests.get(url, timeout=10)
-            data = response.json()
+            # 获取多个类别以增加覆盖面
+            categories_to_fetch = ["general", "technology", "business", "science"]
             
-            if data.get("status") == "ok":
-                for article in data.get("articles", []):
-                    if article['title'] == "[Removed]" or not article['title'] or not article['url']:
-                        continue
-                    
-                    pub_time = article.get('publishedAt')
-                    if not pub_time or not is_within_24h(pub_time):
-                        continue
-                    
-                    time_display = "LIVE"
-                    try:
-                        dt = datetime.datetime.strptime(pub_time, "%Y-%m-%dT%H:%M:%SZ")
-                        dt = dt.replace(tzinfo=datetime.timezone.utc)
-                        diff = now_utc - dt
+            for category in categories_to_fetch:
+                url = f"https://newsapi.org/v2/top-headlines?category={category}&language=en&pageSize=100&apiKey={NEWS_API_KEY}"
+                response = requests.get(url, timeout=10)
+                data = response.json()
+                
+                if data.get("status") == "ok":
+                    for article in data.get("articles", []):
+                        if article['title'] == "[Removed]" or not article['title'] or not article['url']:
+                            continue
                         
-                        if diff.total_seconds() < 3600:
-                            time_display = f"{int(diff.total_seconds()/60)}m ago"
-                        else:
-                            time_display = f"{int(diff.total_seconds()/3600)}h ago"
-                    except:
-                        pass
+                        pub_time = article.get('publishedAt')
+                        if not pub_time or not is_within_24h(pub_time):
+                            continue
+                        
+                        time_display = "LIVE"
+                        try:
+                            dt = datetime.datetime.strptime(pub_time, "%Y-%m-%dT%H:%M:%SZ")
+                            dt = dt.replace(tzinfo=datetime.timezone.utc)
+                            diff = now_utc - dt
+                            
+                            if diff.total_seconds() < 3600:
+                                time_display = f"{int(diff.total_seconds()/60)}m ago"
+                            else:
+                                time_display = f"{int(diff.total_seconds()/3600)}h ago"
+                        except:
+                            pass
 
-                    news_item = {
-                        "title": article['title'],
-                        "source": article['source']['name'] or "NewsAPI",
-                        "link": article['url'],
-                        "time": time_display
-                    }
-                    
-                    category = categorize_news(article['title'])
-                    all_news[category].append(news_item)
+                        news_item = {
+                            "title": article['title'],
+                            "source": article['source']['name'] or "NewsAPI",
+                            "link": article['url'],
+                            "time": time_display
+                        }
+                        
+                        cat = categorize_news(article['title'])
+                        # 避免重复
+                        if news_item not in all_news[cat]:
+                            all_news[cat].append(news_item)
         except:
             pass
 
     # 2. Google News Fallback
-    if sum(len(v) for v in all_news.values()) < 20:
+    if sum(len(v) for v in all_news.values()) < 40:
         try:
             rss_url = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
             feed = feedparser.parse(rss_url)
             
-            for entry in feed.entries[:100]:
+            for entry in feed.entries[:150]:  # 增加获取数量
                 if hasattr(entry, 'published_parsed'):
                     try:
                         dt_utc = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed), datetime.timezone.utc)
@@ -461,36 +470,41 @@ def fetch_categorized_news():
                     "time": time_display
                 }
                 
-                category = categorize_news(entry.title)
-                all_news[category].append(news_item)
+                cat = categorize_news(entry.title)
+                if news_item not in all_news[cat]:
+                    all_news[cat].append(news_item)
         except:
             pass
     
     return all_news
 
-# --- 🔥 B. Google Trends - 修复版 ---
+# --- 🔥 B. Google Trends - 实时趋势版本 ---
 @st.cache_data(ttl=1800)
 def fetch_google_trends():
-    """获取Google Trends数据，带热度分级"""
-    url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
+    """获取Google实时趋势数据"""
     trends = []
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
-    
+    # 方法1: 尝试 Google Trends 每日趋势 RSS
     try:
+        url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
         response = requests.get(url, headers=headers, timeout=8)
+        
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
-            for entry in feed.entries[:15]:
+            for entry in feed.entries[:20]:  # 增加到20条
                 traffic = "10K+"
                 if hasattr(entry, 'ht_approx_traffic'):
                     traffic = entry.ht_approx_traffic.replace(',', '').replace('+', '')
                 
                 # 热度分级
                 try:
-                    traffic_num = int(traffic.replace('K', '000').replace('M', '000000').replace('+', ''))
+                    # 移除 + 和 K/M 后缀进行比较
+                    traffic_clean = traffic.replace('+', '').replace('K', '000').replace('M', '000000')
+                    traffic_num = int(traffic_clean) if traffic_clean.isdigit() else 0
+                    
                     if traffic_num > 500000:
                         heat_level = "hot"
                     elif traffic_num > 100000:
@@ -505,14 +519,17 @@ def fetch_google_trends():
                     "vol": traffic if hasattr(entry, 'ht_approx_traffic') else "10K+",
                     "heat": heat_level
                 })
-    except:
+    except Exception as e:
         pass
     
+    # 如果获取失败，使用备用数据
     if not trends:
         trends = [
             {"name": "Global Markets", "vol": "2M+", "heat": "hot"},
             {"name": "AI Technology", "vol": "1M+", "heat": "warm"},
-            {"name": "Crypto News", "vol": "500K+", "heat": "cool"}
+            {"name": "Cryptocurrency", "vol": "800K+", "heat": "warm"},
+            {"name": "Climate Change", "vol": "500K+", "heat": "cool"},
+            {"name": "Space Exploration", "vol": "300K+", "heat": "cool"}
         ]
     
     return trends
@@ -744,6 +761,70 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# --- 4.1.5 Global Time Clock ---
+now_utc = datetime.datetime.now(datetime.timezone.utc)
+times = {
+    "NYC": {
+        "time": (now_utc - datetime.timedelta(hours=5)).strftime("%H:%M"),
+        "emoji": "🗽",
+        "label": "New York"
+    },
+    "LON": {
+        "time": now_utc.strftime("%H:%M"),
+        "emoji": "🇬🇧",
+        "label": "London"
+    },
+    "ABD": {
+        "time": (now_utc + datetime.timedelta(hours=4)).strftime("%H:%M"),
+        "emoji": "🕌",
+        "label": "Abu Dhabi"
+    },
+    "BJS": {
+        "time": (now_utc + datetime.timedelta(hours=8)).strftime("%H:%M"),
+        "emoji": "🇨🇳",
+        "label": "Beijing"
+    }
+}
+
+st.markdown(f"""
+<div style="
+    display: flex; 
+    justify-content: center; 
+    gap: 30px; 
+    margin: 20px auto 30px auto;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    border-radius: 12px;
+    max-width: 900px;
+    flex-wrap: wrap;
+">
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
+        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['NYC']['emoji']}</span>
+        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['NYC']['label']}</span>
+        <span style="color: #ef4444; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['NYC']['time']}</span>
+    </div>
+    
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
+        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['LON']['emoji']}</span>
+        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['LON']['label']}</span>
+        <span style="color: #fbbf24; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['LON']['time']}</span>
+    </div>
+    
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
+        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['ABD']['emoji']}</span>
+        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['ABD']['label']}</span>
+        <span style="color: #10b981; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['ABD']['time']}</span>
+    </div>
+    
+    <div style="display: flex; flex-direction: column; align-items: center; min-width: 150px;">
+        <span style="font-size: 1.5rem; margin-bottom: 5px;">{times['BJS']['emoji']}</span>
+        <span style="color: #9ca3af; font-size: 0.8rem; margin-bottom: 3px;">{times['BJS']['label']}</span>
+        <span style="color: #3b82f6; font-size: 1.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{times['BJS']['time']}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 # --- 4.2 Search Bar ---
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
@@ -834,30 +915,30 @@ if not st.session_state.messages:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Category Tabs
+        # Category Tabs - 使用真实的按钮交互
+        st.markdown('<div style="text-align: center; margin-bottom: 15px;">', unsafe_allow_html=True)
+        cat_cols = st.columns(4)
         categories = ["all", "politics", "web3", "tech"]
         cat_labels = {"all": "🌐 All", "politics": "🏛️ Politics", "web3": "₿ Web3", "tech": "🤖 Tech"}
         
-        tab_html = '<div class="category-tabs">'
-        for cat in categories:
-            active_class = "active" if st.session_state.news_category == cat else ""
-            tab_html += f'<div class="category-tab {active_class}" onclick="document.getElementById(\'{cat}-radio\').click()">{cat_labels[cat]}</div>'
-        tab_html += '</div>'
-        st.markdown(tab_html, unsafe_allow_html=True)
-        
-        # Hidden radio for state management
-        selected_cat = st.radio("Category", categories, index=categories.index(st.session_state.news_category), label_visibility="collapsed", horizontal=True, key="cat_selector")
-        st.session_state.news_category = selected_cat
+        for idx, cat in enumerate(categories):
+            with cat_cols[idx]:
+                button_style = "active" if st.session_state.news_category == cat else ""
+                if st.button(cat_labels[cat], key=f"cat_btn_{cat}", use_container_width=True):
+                    st.session_state.news_category = cat
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
         
         # Fetch & Display News
         all_news = fetch_categorized_news()
         
         if st.session_state.news_category == "all":
             display_news = []
+            # 从每个分类取更多新闻
             for cat in ["politics", "web3", "tech", "general"]:
-                display_news.extend(all_news[cat][:5])
+                display_news.extend(all_news[cat][:10])  # 每个分类10条
         else:
-            display_news = all_news[st.session_state.news_category][:20]
+            display_news = all_news[st.session_state.news_category][:30]  # 单个分类30条
         
         if display_news:
             rows = [display_news[i:i+2] for i in range(0, min(len(display_news), 12), 2)]
@@ -892,19 +973,18 @@ if not st.session_state.messages:
     with col_markets:
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444; text-transform:uppercase; letter-spacing:1px;">💰 Prediction Markets</span><span style="font-size:0.7rem; color:#9ca3af;">POLYMARKET</span></div>', unsafe_allow_html=True)
         
-        # Sort Options
-        sort_options = ["volume", "active"]
-        sort_labels = {"volume": "💵 Volume", "active": "🔥 Activity"}
+        # Sort Options - 使用真实按钮
+        sort_cols = st.columns(2)
+        with sort_cols[0]:
+            if st.button("💵 Volume", key="sort_volume", use_container_width=True):
+                st.session_state.market_sort = "volume"
+                st.rerun()
+        with sort_cols[1]:
+            if st.button("🔥 Activity", key="sort_activity", use_container_width=True):
+                st.session_state.market_sort = "active"
+                st.rerun()
         
-        sort_html = '<div style="display:flex; gap:10px; margin-bottom:15px;">'
-        for opt in sort_options:
-            active = "active" if st.session_state.market_sort == opt else ""
-            sort_html += f'<div class="category-tab {active}" onclick="document.getElementById(\'{opt}-sort\').click()" style="flex:1; text-align:center;">{sort_labels[opt]}</div>'
-        sort_html += '</div>'
-        st.markdown(sort_html, unsafe_allow_html=True)
-        
-        selected_sort = st.radio("Sort", sort_options, index=sort_options.index(st.session_state.market_sort), label_visibility="collapsed", horizontal=True, key="sort_selector")
-        st.session_state.market_sort = selected_sort
+        st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
         
         # Fetch Markets
         markets = fetch_top_polymarkets(sort_by=st.session_state.market_sort, limit=20)
