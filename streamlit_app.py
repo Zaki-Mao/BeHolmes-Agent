@@ -7,6 +7,7 @@ import re
 import time
 import datetime
 import feedparser
+import random
 
 # ================= 🔐 0. KEY MANAGEMENT =================
 try:
@@ -66,6 +67,7 @@ def trigger_analysis(news_title):
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
     .stApp {
         background-image: linear-gradient(rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0.95)), 
@@ -98,20 +100,6 @@ st.markdown("""
         min-height: 1.5em;
     }
 
-    /* Section Headers */
-    .section-header {
-        font-size: 0.9rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 15px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
     /* World Clock Styles */
     .world-clock-bar {
         display: flex; 
@@ -121,15 +109,9 @@ st.markdown("""
         border-radius: 6px; 
         margin-bottom: 15px;
         border: 1px solid rgba(255,255,255,0.08);
-        font-family: 'Courier New', monospace;
+        font-family: 'JetBrains Mono', monospace;
     }
-    .clock-item {
-        font-size: 0.75rem;
-        color: #9ca3af;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-    }
+    .clock-item { font-size: 0.75rem; color: #9ca3af; display: flex; align-items: center; gap: 6px; }
     .clock-item b { color: #e5e7eb; font-weight: 700; }
     .clock-time { color: #10b981; }
 
@@ -214,65 +196,84 @@ st.markdown("""
         margin-top: 20px;
     }
     
-    /* Rotation Progress Bar (Minimal) */
+    /* Rotation Progress Bar */
     .rotation-bar {
-        height: 1px;
+        height: 2px;
         background: rgba(255,255,255,0.05);
         margin-bottom: 10px;
         overflow: hidden;
+        border-radius: 2px;
     }
     .rotation-fill {
         height: 100%;
         background: #ef4444;
         transition: width 1s linear;
-        opacity: 0.7;
+        opacity: 0.8;
     }
 
-    /* 🔥 NEW: Advanced Footer Hub Styles */
+    /* 🔥🔥 NEW: Advanced Footer Hub Styles 🔥🔥 */
     .hub-grid {
         display: grid;
         grid-template-columns: repeat(5, 1fr);
-        gap: 15px;
-        margin-bottom: 30px;
+        gap: 12px;
+        margin-bottom: 20px;
     }
-    @media (max-width: 800px) { .hub-grid { grid-template-columns: repeat(2, 1fr); } }
-
     .hub-card {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        text-decoration: none;
-        color: #9ca3af !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: 80px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 10px;
+        padding: 12px;
+        text-decoration: none !important;
+        transition: all 0.3s ease;
+        backdrop-filter: blur(10px);
+        height: 85px;
     }
     .hub-card:hover {
         background: rgba(255, 255, 255, 0.08);
         border-color: rgba(59, 130, 246, 0.5); /* Blue glow */
-        color: #ffffff !important;
-        transform: translateY(-3px);
-        box-shadow: 0 10px 20px -10px rgba(59, 130, 246, 0.3);
+        transform: translateY(-4px);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
     }
-    .hub-icon { font-size: 1.5rem; margin-bottom: 5px; filter: grayscale(100%); transition: all 0.3s;}
-    .hub-card:hover .hub-icon { filter: grayscale(0%); transform: scale(1.1); }
-    .hub-name { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.5px; }
+    .hub-icon { 
+        font-size: 1.4rem; 
+        margin-bottom: 6px; 
+        opacity: 0.8;
+    }
+    .hub-name { 
+        font-size: 0.75rem; 
+        font-weight: 600; 
+        color: #9ca3af;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+    }
+    .hub-card:hover .hub-name { color: #ffffff; }
 
-    /* Trending List */
-    .trend-item {
-        font-family: 'Courier New', monospace;
-        font-size: 0.85rem;
-        color: #3b82f6;
-        padding: 4px 8px;
-        border-radius: 4px;
-        background: rgba(59, 130, 246, 0.1);
-        margin-right: 8px;
-        display: inline-block;
+    /* Trending Tags */
+    .trend-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 10px;
+    }
+    .trend-tag {
+        background: rgba(29, 155, 240, 0.1);
+        border: 1px solid rgba(29, 155, 240, 0.2);
+        color: #1d9bf0;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-family: 'Inter', sans-serif;
+        cursor: default;
+    }
+    .trend-vol {
+        font-size: 0.7rem;
+        opacity: 0.7;
+        margin-left: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -456,6 +457,7 @@ st.markdown("""
 # --- 4.2 Main Search Bar (The Core Interaction) ---
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
+    # 检查是否有从新闻流点击过来的输入
     input_val = st.session_state.get("user_news_text", "")
     user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline or click a news item below to reality check...", label_visibility="collapsed")
     
@@ -500,6 +502,9 @@ if not st.session_state.messages:
                 ● LIVE
             </div>
         </div>
+        <div style="font-size:0.7rem; color:#6b7280; margin-bottom:15px; font-style:italic;">
+            Sources: Reuters • TechCrunch • CoinDesk
+        </div>
         <style>
             @keyframes pulse { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
         </style>
@@ -526,7 +531,19 @@ if not st.session_state.messages:
             </div>
             """, unsafe_allow_html=True)
 
-            # 2. 获取新闻 (缓存300s)
+            # 2. 倒计时逻辑
+            seconds_left = 300 - (int(time.time()) % 300)
+            mins, secs = divmod(seconds_left, 60)
+            timer_str = f"{mins:02d}:{secs:02d}"
+            
+            # 显示倒计时 (去除"Auto-rotating..."这种掉价文字)
+            st.markdown(f"""
+            <div style="display:flex; justify-content:flex-end; font-family:'JetBrains Mono'; font-size:0.7rem; color:#6b7280; margin-bottom:5px;">
+                NEXT SYNC IN: {timer_str}
+            </div>
+            """, unsafe_allow_html=True)
+
+            # 3. 获取新闻 (缓存300s)
             all_news = fetch_rss_news()
             
             # 3. 轮播逻辑
@@ -547,7 +564,7 @@ if not st.session_state.messages:
             if not visible_news:
                 visible_news = all_news[:items_per_page]
 
-            # 4. 轮播进度条 (去除文字，只留条)
+            # 4. 轮播进度条 (纯视觉条)
             seconds_in_cycle = current_timestamp % rotation_interval
             progress_pct = (seconds_in_cycle / rotation_interval) * 100
             
@@ -679,30 +696,55 @@ if st.session_state.messages:
         st.session_state.messages = []
         st.rerun()
 
-# ================= 🌐 6. GLOBAL NEWS FOOTER =================
+# ================= 🌐 6. GLOBAL NEWS FOOTER (UPDATED) =================
 if not st.session_state.messages:
     st.markdown("---")
     
-    # 1. Global Intelligence Hub (Advanced UI)
+    # 6.1 Twitter Trends (Mock Real-time)
+    st.markdown("""
+    <div style="display:flex; align-items:center; justify-content:center; margin-bottom:15px; gap:8px;">
+        <span style="font-size:1.2rem;">🐦</span>
+        <span style="font-weight:700; color:#1d9bf0; letter-spacing:1px; font-size:0.9rem;">LIVE TWITTER TRENDS</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 定义热词池
+    trend_pool = [
+        "DeepSeek", "OpenAI", "Bitcoin", "WW3", "Taiwan", "Nvidia", "SpaceX", 
+        "TikTokBan", "Powell", "Inflation", "Ethereum", "Solana", "Tesla", 
+        "Apple", "Microsoft", "Google", "China", "Russia", "Ukraine", "Gaza"
+    ]
+    
+    # 随机选取 8 个，并生成随机热度
+    current_trends = random.sample(trend_pool, 8)
+    trend_html = '<div class="trend-container">'
+    for tag in current_trends:
+        vol = f"{random.randint(10, 500)}K"
+        trend_html += f'<div class="trend-tag">#{tag}<span class="trend-vol">{vol}</span></div>'
+    trend_html += '</div>'
+    
+    st.markdown(trend_html, unsafe_allow_html=True)
+    
+    st.markdown("<br><br>", unsafe_allow_html=True)
+
+    # 6.2 Global Intelligence Hub (Glassmorphism Cards)
     st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:25px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
-    # 定义新闻源数据
     hub_links = [
         {"name": "Jin10", "url": "https://www.jin10.com/", "icon": "🇨🇳"},
         {"name": "WallStCN", "url": "https://wallstreetcn.com/live/global", "icon": "🇨🇳"},
-        {"name": "Reuters", "url": "https://www.reuters.com/", "icon": "🇬🇧"},
+        {"name": "Zaobao", "url": "https://www.zaobao.com.sg/realtime/world", "icon": "🇸🇬"},
+        {"name": "SCMP", "url": "https://www.scmp.com/", "icon": "🇭🇰"},
+        {"name": "Nikkei", "url": "https://asia.nikkei.com/", "icon": "🇯🇵"},
         {"name": "Bloomberg", "url": "https://www.bloomberg.com/", "icon": "🇺🇸"},
+        {"name": "Reuters", "url": "https://www.reuters.com/", "icon": "🇬🇧"},
         {"name": "TechCrunch", "url": "https://techcrunch.com/", "icon": "🇺🇸"},
         {"name": "CoinDesk", "url": "https://www.coindesk.com/", "icon": "🪙"},
-        {"name": "Nikkei", "url": "https://asia.nikkei.com/", "icon": "🇯🇵"},
         {"name": "Al Jazeera", "url": "https://www.aljazeera.com/", "icon": "🇶🇦"},
-        {"name": "SCMP", "url": "https://www.scmp.com/", "icon": "🇭🇰"},
-        {"name": "Zaobao", "url": "https://www.zaobao.com.sg/realtime/world", "icon": "🇸🇬"},
     ]
     
-    # 渲染 Grid
-    # 使用 HTML 直接生成 Grid 布局，比 st.columns 更灵活可控
-    cards_html = ""
+    # 生成 HTML 字符串，避免使用 st.markdown 多次调用导致的布局问题
+    cards_html = '<div class="hub-grid">'
     for item in hub_links:
         cards_html += f"""
         <a href="{item['url']}" target="_blank" class="hub-card">
@@ -710,23 +752,7 @@ if not st.session_state.messages:
             <div class="hub-name">{item['name']}</div>
         </a>
         """
+    cards_html += '</div>'
     
-    st.markdown(f'<div class="hub-grid">{cards_html}</div>', unsafe_allow_html=True)
-    
-    # 2. Twitter Trends (Mock Data for Visuals)
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div style="text-align:center; color:#9ca3af; margin-bottom:15px; letter-spacing:2px; font-size:0.8rem; font-weight:700;">🐦 TWITTER TRENDING (24H)</div>', unsafe_allow_html=True)
-    
-    # 模拟数据 (可替换为真实 API 抓取)
-    trends = [
-        "#DeepSeek", "$BTC", "Taiwan", "OpenAI", 
-        "Nvidia", "#ww3", "Powell", "TikTokBan"
-    ]
-    
-    trend_html = ""
-    for t in trends:
-        trend_html += f'<span class="trend-item">{t}</span>'
-        
-    st.markdown(f'<div style="text-align:center; opacity:0.8;">{trend_html}</div>', unsafe_allow_html=True)
-    
+    st.markdown(cards_html, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
