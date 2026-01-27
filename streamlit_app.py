@@ -449,7 +449,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (List Selection + Bilingual + Chat Memory + Links + DEEP INSIGHT) ---
+# --- 🔥 D. NEW AGENT LOGIC (PM Mode v17.0) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -504,7 +504,7 @@ def is_chinese_input(text):
 
 def get_agent_response(history, market_data):
     """
-    Handles the full chat conversation with memory and context.
+    Handles the full chat conversation with PORTFOLIO MANAGER logic.
     """
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -516,116 +516,122 @@ def get_agent_response(history, market_data):
     if market_data:
         if is_cn:
             market_context = f"""
-            ✅ **[数据锚点] Polymarket 预测市场数据**
+            ✅ **[真实资金定价] Polymarket 数据**
             - **问题:** {market_data['title']}
-            - **赔率 (真金白银的共识):** {market_data['odds']}
-            - **资金量:** {market_data['volume']}
+            - **赔率:** {market_data['odds']}
+            - **成交量:** {market_data['volume']}
             
-            **指令:** 必须将新闻声称的事实与上述市场赔率进行对比。
-            - 赔率是否发生了剧烈波动？
-            - 市场是在押注此事发生(Yes > 60%)还是认为是噪音(Yes < 20%)？
+            **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
             """
         else:
             market_context = f"""
-            ✅ **[DATA ANCHOR] Polymarket Real-Time Data**
+            ✅ **[MARKET PRICING] Polymarket Data**
             - **Market:** {market_data['title']}
             - **Odds:** {market_data['odds']}
             - **Volume:** {market_data['volume']}
             
-            **INSTRUCTION:** Anchor your analysis on these odds. Divergence between news hype and odds = Opportunity.
+            **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
             """
     else:
         if is_cn:
-            market_context = "❌ **未找到直接对应的预测市场**。请使用逻辑推演和历史类似事件（如 'Cui Bono' 谁获益原则）进行分析。"
+            market_context = "❌ **无直接预测市场数据**。请基于逻辑推演，寻找其他相关资产的定价偏差。"
         else:
-            market_context = "❌ **NO DIRECT PREDICTION MARKET**. Use 'Cui Bono' (Who benefits?) logic and historical precedents."
+            market_context = "❌ **NO DIRECT MARKET DATA**. Derive implied probability from logical inference."
 
-    # 2. System Prompt Selection (DEEP INSIGHT MODE)
+    # 2. System Prompt Selection (PORTFOLIO MANAGER MODE)
     if is_cn:
         system_prompt = f"""
-        你是一位极其犀利的【买方对冲基金经理】(Buy-side Hedge Fund Manager)。你的工作不是复述新闻，而是寻找市场定价错误 (Mispricing) 和 交易机会 (Alpha)。
+        你不仅是分析师，更是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
         当前日期: {current_date}
+        你的目标不是写新闻通稿，而是构建 **高赔率的交易组合**。
         
-        **核心原则 (禁止事项):**
-        1. **拒绝废话:** 不要像维基百科那样介绍背景，除非对交易逻辑至关重要。
-        2. **拒绝模糊:** 禁止使用“可能”、“或许”等词汇，除非你能给出概率区间。
-        3. **拒绝单边:** 必须进行“红队测试” (Red Teaming)，指出看空理由或潜在风险。
-        4. **强制链接:** 提到具体标的时，必须使用Markdown链接 (Yahoo Finance/Binance等)。
+        **分析原则 (Iron Rules):**
+        1. **寻找预期差 (Variant Perception)**: 市场现在的定价Price-in了什么？你的观点与之有何不同？差异就是利润来源。
+        2. **区分信号与噪音**: 谁在推动这个叙事？是否有具体利益相关方？（Cui Bono原则）
+        3. **量化思维**: 不要说“风险很大”，要说“发生X的概率约为30%，若发生则资产Y下跌20%”。
+        4. **交易结构化**: 给出具体的【入场点】、【失效点(止损逻辑)】和【工具选择】。
+        5. **强制链接**: 提到具体标的时，必须使用Markdown链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
+        6. **语言强制**: **必须全程使用中文回答**。
 
         {market_context}
         
-        --- 深度分析报告结构 ---
+        --- 基金经理决策备忘录 (Memorandum) ---
         
-        ### 1. 🩸 核心叙事 vs 市场定价 (The Gap)
-        * **一句话定性**: 这是一次“噪音”、“陷阱”还是“黄金机会”？
-        * **预期差**: 大众/媒体怎么看？聪明钱(Smart Money)/赔率怎么看？二者是否存在背离？
+        ### 1. 🩸 市场定价 vs 真实逻辑 (The Disconnect)
+        * **当前共识**: 市场目前在交易什么逻辑？（Price-in了什么？）
+        * **核心分歧**: 大众/媒体忽略了什么关键变量？
+        * **可证伪性**: 关注哪个具体指标（如某日财报、某项法案投票）来验证你的观点？
         
-        ### 2. 🕵️‍♂️ 深度归因 (Why Now & Cui Bono)
-        * **时机**: 为什么是现在发生？幕后推手是谁？
-        * **利益链条**: 谁是最大的赢家？谁是最大的输家？(不要只看表面)
+        ### 2. 🕵️‍♂️ 归因与博弈 (Attribution)
+        * **驱动力**: 是基本面改变，还是情绪资金/做市商在逼空？
+        * **关键决策者**: 涉及的人物（如CEO、政客）的历史行为模式是什么？
         
-        ### 3. 💣 风险与估值锚点 (The Bear Case)
-        * **下行风险**: 如果你的判断错了，最大的黑天鹅是什么？(监管？技术证伪？)
-        * **估值逻辑**: 当前价格是否已经Price-in了此消息？给出一个参照系 (Benchmark)。
+        ### 3. 🎲 情景推演 (Scenario Analysis)
+        * **基准情景 (60%)**: [描述] -> 对资产A的影响。
+        * **牛市情景 (20%)**: [描述] -> 对资产B的影响。
+        * **黑天鹅/尾部风险 (20%)**: [描述] -> 必须对冲的风险点。
         
-        ### 4. 💸 交易执行 (Actionable Alpha)
-        * **🎲 预测市场策略 (Polymarket)**:
-            * *置信度*: [0-100]%
-            * *操作*: 买入 Yes/No？还是套利？
-            * *久期*: 事件驱动型(Event-driven) 还是 趋势型(Trend)？
-        * **📈 资本市场策略**:
-            * **核心标的**: [股票代码+链接] (例如 [NVDA](https://finance.yahoo.com/quote/NVDA))。*逻辑: 它是铲子股还是矿主？*
-            * **对冲标的**: [股票/Crypto代码+链接]。*逻辑: 如何保护下行风险？*
-            * **跨资产联动**: 对汇率、大宗商品或国债收益率的影响。
+        ### 4. 💸 交易执行 (The Trade Book)
+        *(请给出具体操作建议)*
+        * **🎯 核心多头 (Long)**:
+            * **标的**: [代码+链接]
+            * **逻辑**: 它是受益于“铲子效应”还是“直接涨价”？
+            * **失效点**: 如果发生[事件X]，立即止损。
+        * **📉 核心空头/对冲 (Short/Hedge)**:
+            * **标的**: [代码+链接] (如做空某高估股票，或买入看跌期权)
+            * **逻辑**: 谁的护城河被打破了？
+        * **⏳ 期限与工具**: 建议使用股票、期权还是期货？持仓多久？
             
-        ### 5. 🏁 最终结论 (The Bottom Line)
-        * 用交易员的黑话总结：Long what? Short what? Watch what?
+        ### 5. 🏁 最终指令 (PM Conclusion)
+        * 一句话交易指令（例如：买入波动率，做多美元，观望）。
         """
     else:
         system_prompt = f"""
-        You are a ruthless **Buy-side Hedge Fund Manager**. Your job is not to summarize news, but to find **Mispricing** and **Alpha**.
+        You are a **Global Macro Portfolio Manager (PM)** managing a multi-billion dollar book.
         Current Date: {current_date}
+        Your goal is NOT to summarize news, but to **Construct High-EV Trades**.
         
-        **CORE RULES (Forbidden):**
-        1. **NO WIKIPEDIA:** Do not explain background unless it drives the trade.
-        2. **NO VAGUENESS:** Avoid "likely" or "maybe" without probability weights.
-        3. **NO ECHO CHAMBER:** You must "Red Team" the thesis (Find the Bear Case).
-        4. **MANDATORY LINKS:** Link all tickers to Yahoo Finance or Binance.
+        **IRON RULES:**
+        1. **Variant Perception**: What is priced in? What is the market missing? That gap is your Alpha.
+        2. **Quantify**: Don't say "risky". Say "30% prob of X, implied impact -15%".
+        3. **Structure**: Give me Entry, Invalidation (Stop Loss logic), and Instrument choice.
+        4. **Smart Links**: Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
+        5. **Language**: **Output MUST be in English**.
 
         {market_context}
         
-        --- DEEP DIVE REPORT STRUCTURE ---
+        --- INVESTMENT MEMORANDUM ---
         
-        ### 1. 🩸 Narrative vs. Price (The Gap)
-        * **Verdict**: Is this Noise, a Trap, or Gold?
-        * **Expectation Gap**: What does the retail mob think? What does the Smart Money (Odds) think? Where is the arb?
+        ### 1. 🩸 Consensus vs. Reality (The Disconnect)
+        * **Priced In**: What does the current price action tell us?
+        * ** The Edge**: What specific variable is the crowd ignoring?
+        * **Falsifiability**: What specific event/data point proves you wrong?
         
-        ### 2. 🕵️‍♂️ Cui Bono (Who Benefits?)
-        * **Timing**: Why now? Who pushed this narrative?
-        * **Value Chain**: Who is the *real* winner/loser? (Look beneath the surface)
+        ### 2. 🕵️‍♂️ Attribution & Game Theory
+        * **Driver**: Fundamental shift or Liquidity/Gamma squeeze?
+        * **Behavioral**: Analyze the incentives of key players (Cui Bono).
         
-        ### 3. 💣 The Bear Case & Valuation
-        * **Downside Risk**: How does this thesis die? (Regulation? Tech failure?)
-        * **Priced In?**: Is the upside already captured in the price? Provide a valuation benchmark.
+        ### 3. 🎲 Scenario Probabilities (Expected Value)
+        * **Base Case (60%)**: [Outcome] -> Asset Impact.
+        * **Bull Case (20%)**: [Outcome] -> Asset Impact.
+        * **Tail Risk (20%)**: [Outcome] -> The "Widowmaker" scenario.
         
-        ### 4. 💸 Execution (Actionable Alpha)
-        * **🎲 Prediction Market Strategy**:
-            * *Confidence*: [0-100]%
-            * *Action*: Buy Yes/No?
-            * *Duration*: Scalp or Hold?
-        * **📈 Capital Market Strategy**:
-            * **Core Longs**: [Ticker+Link] (e.g. [TSLA](https://finance.yahoo.com/quote/TSLA)). *Thesis: Pick and shovel or gold miner?*
-            * **Hedges/Shorts**: [Ticker+Link]. *Thesis: Who gets disrupted?*
-            * **Cross-Asset**: Impact on FX, Rates, or Commodities.
+        ### 4. 💸 The Trade Book (Execution)
+        * **🎯 Top Longs**:
+            * **Asset**: [Ticker+Link]
+            * **Thesis**: Why this specific asset?
+            * **Invalidation**: "Sell if..."
+        * **📉 Shorts / Hedges**:
+            * **Asset**: [Ticker+Link]
+            * **Rationale**: Who is the loser?
+        * **⏳ Structure**: Spot vs Options? Duration?
             
-        ### 5. 🏁 The Bottom Line
-        * Trader's Summary: Long what? Short what? Watch what?
+        ### 5. 🏁 PM Conclusion
+        * The "Bottom Line" trade instruction.
         """
     
-    # Construct full history for API
     api_messages = [{"role": "user", "parts": [system_prompt]}]
     for msg in history:
-        # Map app roles to Gemini roles
         role = "user" if msg['role'] == "user" else "model"
         api_messages.append({"role": role, "parts": [msg['content']]})
         
@@ -678,7 +684,6 @@ with s_mid:
                     if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
                         st.session_state.current_market = m
                         st.session_state.search_stage = "analysis"
-                        # Prepare initial message history
                         st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
                         st.rerun()
         else:
@@ -697,19 +702,17 @@ with s_mid:
 
     # === Step 3: ANALYSIS Execution (Initial Run) ===
     elif st.session_state.search_stage == "analysis":
-        # If the last message is from user, generate response
         if st.session_state.messages and st.session_state.messages[-1]['role'] == 'user':
             with st.spinner("🧠 Generating Alpha Signals..."):
                 response_text = get_agent_response(st.session_state.messages, st.session_state.current_market)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
-                st.rerun() # Rerun to display the new message in the chat loop below
+                st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # === DISPLAY ANALYSIS & CHAT (Interactive Mode) ===
 if st.session_state.messages and st.session_state.search_stage == "analysis":
     
-    # 1. Market Data Context Card (Always visible at top)
     if st.session_state.current_market:
         m = st.session_state.current_market
         st.markdown(f"""
@@ -730,10 +733,8 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
         </div>
         """, unsafe_allow_html=True)
 
-    # 2. Chat History
+    # Chat History
     for msg in st.session_state.messages:
-        # Skip the very first "Analyze this news..." system-like user prompt if desired, 
-        # or display it. Displaying it helps context.
         if msg['role'] == 'user':
             with st.chat_message("user"):
                 st.write(msg['content'].replace("Analyze this news: ", "News: "))
@@ -741,12 +742,11 @@ if st.session_state.messages and st.session_state.search_stage == "analysis":
             with st.chat_message("assistant"):
                 st.markdown(msg['content'])
 
-    # 3. Chat Input (Follow-up)
+    # Chat Input
     if prompt := st.chat_input("Ask a follow-up question (e.g. 'What about Tesla?')..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.rerun()
 
-    # Back Button
     st.markdown("---")
     if st.button("⬅️ Start New Analysis"):
         st.session_state.messages = []
