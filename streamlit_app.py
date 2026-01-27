@@ -52,15 +52,10 @@ st.set_page_config(
 default_state = {
     "messages": [],
     "current_market": None,
-    "first_visit": True,
-    "last_search_query": "",
-    "search_results": [],
-    "show_market_selection": False,
-    "selected_market_index": -1,
-    "direct_analysis_mode": False,
+    "search_candidates": [],     # Stores list of found markets
+    "search_stage": "input",     # input -> selection -> analysis
     "user_news_text": "",
     "is_processing": False,
-    "last_user_input": "",
     "news_category": "all",
     "market_sort": "volume"
 }
@@ -323,7 +318,7 @@ st.markdown("""
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices (Extended List) ---
+# --- 🔥 A. Crypto Prices ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices_v2():
     symbols = [
@@ -400,16 +395,16 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (FILTERED) ---
+# --- 🔥 C. Polymarket Fetcher (FILTERED & EXPANDED) ---
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
     try:
-        # Fetch more to allow for filtering
+        # 1. Fetch more items to allow for filtering (settled/sensitive)
         url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
-        # 敏感词过滤 (Sensitive Keywords)
+        # 2. 敏感词过滤 (Sensitive Keywords)
         SENSITIVE_KEYWORDS = [
             "china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", 
             "hong kong", "communist", "pla", "scs", "south china sea"
@@ -421,15 +416,21 @@ def fetch_polymarket_v5_simple(limit=60):
                     title = event.get('title', 'Untitled').strip()
                     if not title: continue
                     
-                    # 1. 敏感词过滤 (Case insensitive)
+                    # 3. 敏感内容过滤
                     title_lower = title.lower()
                     if any(kw in title_lower for kw in SENSITIVE_KEYWORDS):
                         continue
 
+                    # 4. 状态过滤 (Exclude closed/settled markets visually)
+                    # 虽然API用了 closed=false, 但有些active=false
+                    if event.get('closed') is True: continue
+                    
                     if not event.get('markets'): continue
                     m = event['markets'][0]
                     vol = float(m.get('volume', 0))
-                    if vol <= 0: continue
+                    
+                    # 5. 过滤极低交易量 (死盘)
+                    if vol < 1000: continue
                     
                     if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
                     elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
@@ -447,7 +448,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC ---
+# --- 🔥 D. NEW AGENT LOGIC (List Selection) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -456,43 +457,58 @@ def generate_keywords(user_text):
         return resp.text.strip()
     except: return user_text
 
-def search_market_data(user_query):
-    if not EXA_AVAILABLE or not EXA_API_KEY: return None
+def search_market_data_list(user_query):
+    """
+    Search Polymarket and return A LIST of candidates.
+    """
+    if not EXA_AVAILABLE or not EXA_API_KEY: return []
+    
+    candidates = []
     try:
         exa = Exa(EXA_API_KEY)
         keywords = generate_keywords(user_query)
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=3,
+            num_results=5, # Get top 5 matches
             type="neural",
             include_domains=["polymarket.com"]
         )
+        
         for result in search_resp.results:
             match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
             if match:
                 slug = match.group(1)
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                 data = requests.get(api_url, timeout=5).json()
+                
                 if data and isinstance(data, list):
                     event = data[0]
                     m = event['markets'][0]
+                    
+                    # Filter sensitive in search results too
+                    title_lower = event['title'].lower()
+                    if any(kw in title_lower for kw in ["china", "xi jinping", "taiwan"]):
+                        continue
+
                     outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
                     prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
                     vol = float(m.get('volume', 0))
+                    
                     odds_str = []
                     for i, out in enumerate(outcomes):
                         if i < len(prices):
                             prob = float(prices[i]) * 100
                             odds_str.append(f"{out}: {prob:.1f}%")
-                    return {
+                    
+                    candidates.append({
                         "title": event['title'],
                         "odds": " | ".join(odds_str[:4]),
                         "volume": f"${vol:,.0f}",
                         "slug": slug,
                         "url": f"https://polymarket.com/event/{slug}"
-                    }
+                    })
     except: pass
-    return None
+    return candidates
 
 def analyze_with_agent(user_news, market_data):
     model = genai.GenerativeModel('gemini-2.5-flash')
@@ -549,34 +565,110 @@ def analyze_with_agent(user_news, market_data):
 # ================= 🖥️ 6. MAIN LAYOUT =================
 
 # --- Header ---
-st.markdown('<div class="hero-title">Holmes Global News</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">Be Holmes</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-subtitle">Narrative vs. Reality Engine</div>', unsafe_allow_html=True)
 
-# --- Search Bar ---
+# --- Search Bar & Workflow ---
 _, s_mid, _ = st.columns([1, 6, 1])
 with s_mid:
+    # State reset logic when input changes
+    def on_input_change():
+        st.session_state.search_stage = "input"
+        st.session_state.search_candidates = []
+        
     input_val = st.session_state.get("user_news_text", "")
-    user_query = st.text_area("Analyze News", value=input_val, height=70, placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", label_visibility="collapsed")
+    user_query = st.text_area("Analyze News", value=input_val, height=70, 
+                              placeholder="Paste a headline (e.g., 'Unitree robot on Spring Festival Gala')...", 
+                              label_visibility="collapsed",
+                              on_change=on_input_change, key="news_input_box")
     
-    if st.button("Begin Analysis", use_container_width=True):
-        if user_query:
-            st.session_state.is_processing = True
-            st.session_state.messages = [] 
-            
-            with st.spinner("🕵️‍♂️ Searching Prediction Markets..."):
-                market_data = search_market_data(user_query)
-                st.session_state.current_market = market_data
-            
-            with st.spinner("🧠 Generating Alpha Signals..."):
-                analysis_text = analyze_with_agent(user_query, market_data)
-                st.session_state.messages.append({"role": "assistant", "content": analysis_text})
-                
-            st.session_state.is_processing = False
+    # === Step 1: SEARCH Button ===
+    if st.session_state.search_stage == "input":
+        if st.button("🔍 Search Markets", use_container_width=True):
+            if st.session_state.news_input_box: # Use key value
+                st.session_state.user_news_text = st.session_state.news_input_box # Sync
+                with st.spinner("🕵️‍♂️ Hunting for prediction markets..."):
+                    candidates = search_market_data_list(st.session_state.user_news_text)
+                    st.session_state.search_candidates = candidates
+                    st.session_state.search_stage = "selection"
+                    st.rerun()
+
+    # === Step 2: SELECTION List ===
+    elif st.session_state.search_stage == "selection":
+        st.markdown("##### 🧐 Select a Market to Reality Check:")
+        
+        # Option A: List found markets
+        if st.session_state.search_candidates:
+            for idx, m in enumerate(st.session_state.search_candidates):
+                # Using columns to make it look like a list item
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.info(f"**{m['title']}**\n\nOdds: {m['odds']} (Vol: {m['volume']})")
+                with c2:
+                    if st.button("Analyze", key=f"btn_{idx}", use_container_width=True):
+                        st.session_state.current_market = m
+                        st.session_state.search_stage = "analysis"
+                        st.rerun()
+        else:
+            st.warning("No direct markets found.")
+
+        # Option B: Direct Analysis (Skip)
+        st.markdown("---")
+        if st.button("📝 Analyze News Only (No Market)", use_container_width=True):
+            st.session_state.current_market = None
+            st.session_state.search_stage = "analysis"
             st.rerun()
+            
+        # Reset button
+        if st.button("⬅️ Start Over"):
+            st.session_state.search_stage = "input"
+            st.rerun()
+
+    # === Step 3: ANALYSIS Execution ===
+    elif st.session_state.search_stage == "analysis":
+        if not st.session_state.messages: # Run only if empty
+            with st.spinner("🧠 Generating Alpha Signals..."):
+                analysis_text = analyze_with_agent(st.session_state.user_news_text, st.session_state.current_market)
+                st.session_state.messages.append({"role": "assistant", "content": analysis_text})
+                st.session_state.is_processing = False
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-if not st.session_state.messages:
+# Display Analysis if ready
+if st.session_state.messages:
+    # 1. Market Data Card (If Selected)
+    if st.session_state.current_market:
+        m = st.session_state.current_market
+        st.markdown(f"""
+        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
+            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Selected Prediction Market</div>
+            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px;">{m['title']}</div>
+            <div style="display:flex; justify-content:space-between; margin-top:10px; align-items:center;">
+                <div style="font-family:'JetBrains Mono'; color:#ef4444; font-weight:700;">{m['odds']}</div>
+                <div style="color:#6b7280; font-size:0.8rem;">Vol: {m['volume']}</div>
+            </div>
+            <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:20px; text-align:center; color:#6b7280; font-size:0.8rem;">
+            🤖 Pure AI Analysis (No Market Data Selected)
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 2. AI Analysis Content
+    for msg in st.session_state.messages:
+        if msg['role'] == 'assistant':
+            st.markdown(f"<div class='analysis-card'>{msg['content']}</div>", unsafe_allow_html=True)
+            
+    if st.button("⬅️ New Analysis"):
+        st.session_state.messages = []
+        st.session_state.search_stage = "input"
+        st.rerun()
+
+# ================= 🖥️ DASHBOARD (Only if no analysis active) =================
+if not st.session_state.messages and st.session_state.search_stage == "input":
     col_news, col_markets = st.columns([1, 1], gap="large")
     
     # === LEFT: News Feed ===
@@ -667,7 +759,7 @@ if not st.session_state.messages:
                     st.info("No news available.")
         render_news_feed()
 
-    # === RIGHT: Polymarket (Top Volume Only + Filtered) ===
+    # === RIGHT: Polymarket (Top 60) ===
     with col_markets:
         st.markdown('<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(220,38,38,0.3); padding-bottom:8px;"><span style="font-size:0.9rem; font-weight:700; color:#ef4444;">💰 PREDICTION MARKETS (TOP VOLUME)</span></div>', unsafe_allow_html=True)
         
@@ -696,39 +788,8 @@ if not st.session_state.messages:
         else:
             st.info("Loading markets...")
 
-else:
-    # Analysis View
-    st.markdown("---")
-    if st.session_state.current_market:
-        m = st.session_state.current_market
-        st.markdown(f"""
-        <div style="background:rgba(20,0,0,0.8); border-left:4px solid #ef4444; padding:15px; border-radius:8px; margin-bottom:20px;">
-            <div style="font-size:0.8rem; color:#9ca3af; text-transform:uppercase;">🎯 Live Prediction Market Found</div>
-            <div style="font-size:1.2rem; color:#e5e7eb; font-weight:bold; margin-top:5px;">{m['title']}</div>
-            <div style="display:flex; justify-content:space-between; margin-top:10px; align-items:center;">
-                <div style="font-family:'JetBrains Mono'; color:#ef4444; font-weight:700;">{m['odds']}</div>
-                <div style="color:#6b7280; font-size:0.8rem;">Vol: {m['volume']}</div>
-            </div>
-            <a href="{m['url']}" target="_blank" style="display:inline-block; margin-top:10px; color:#fca5a5; font-size:0.8rem; text-decoration:none;">🔗 View on Polymarket</a>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; margin-bottom:20px; text-align:center; color:#6b7280; font-size:0.8rem;">
-            No direct betting market found for this specific headline. Using AI logical inference.
-        </div>
-        """, unsafe_allow_html=True)
-
-    for msg in st.session_state.messages:
-        if msg['role'] == 'assistant':
-            st.markdown(f"<div class='analysis-card'>{msg['content']}</div>", unsafe_allow_html=True)
-            
-    if st.button("⬅️ Back"):
-        st.session_state.messages = []
-        st.rerun()
-
 # ================= 🌐 7. FOOTER =================
-if not st.session_state.messages:
+if not st.session_state.messages and st.session_state.search_stage == "input":
     st.markdown("---")
     st.markdown('<div style="text-align:center; color:#9ca3af; margin:25px 0; font-size:0.8rem; font-weight:700;">🌐 GLOBAL INTELLIGENCE HUB</div>', unsafe_allow_html=True)
     
@@ -755,4 +816,3 @@ if not st.session_state.messages:
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
-
