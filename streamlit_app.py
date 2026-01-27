@@ -56,6 +56,7 @@ default_state = {
     "search_stage": "input",     # input -> selection -> analysis
     "user_news_text": "",
     "is_processing": False,
+    "last_user_input": "",
     "news_category": "all",
     "market_sort": "volume"
 }
@@ -318,7 +319,7 @@ st.markdown("""
 
 # ================= 🧠 5. LOGIC CORE =================
 
-# --- 🔥 A. Crypto Prices ---
+# --- 🔥 A. Crypto Prices (Extended List) ---
 @st.cache_data(ttl=60)
 def fetch_crypto_prices_v2():
     symbols = [
@@ -399,12 +400,12 @@ def fetch_categorized_news_v2():
 @st.cache_data(ttl=60)
 def fetch_polymarket_v5_simple(limit=60):
     try:
-        # 1. Fetch more items to allow for filtering (settled/sensitive)
+        # Fetch more to allow for filtering
         url = "https://gamma-api.polymarket.com/events?limit=200&closed=false"
         resp = requests.get(url, timeout=8).json()
         markets = []
         
-        # 2. 敏感词过滤 (Sensitive Keywords)
+        # 敏感词过滤 (Sensitive Keywords)
         SENSITIVE_KEYWORDS = [
             "china", "chinese", "xi jinping", "taiwan", "ccp", "beijing", 
             "hong kong", "communist", "pla", "scs", "south china sea"
@@ -416,20 +417,19 @@ def fetch_polymarket_v5_simple(limit=60):
                     title = event.get('title', 'Untitled').strip()
                     if not title: continue
                     
-                    # 3. 敏感内容过滤
+                    # 1. 敏感词过滤 (Case insensitive)
                     title_lower = title.lower()
                     if any(kw in title_lower for kw in SENSITIVE_KEYWORDS):
                         continue
 
-                    # 4. 状态过滤 (Exclude closed/settled markets visually)
-                    # 虽然API用了 closed=false, 但有些active=false
+                    # 2. 状态过滤
                     if event.get('closed') is True: continue
                     
                     if not event.get('markets'): continue
                     m = event['markets'][0]
                     vol = float(m.get('volume', 0))
                     
-                    # 5. 过滤极低交易量 (死盘)
+                    # 3. 过滤极低交易量 (死盘)
                     if vol < 1000: continue
                     
                     if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
@@ -448,7 +448,7 @@ def fetch_polymarket_v5_simple(limit=60):
         return markets[:limit]
     except: return []
 
-# --- 🔥 D. NEW AGENT LOGIC (List Selection) ---
+# --- 🔥 D. NEW AGENT LOGIC (List Selection + Bilingual) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -510,47 +510,116 @@ def search_market_data_list(user_query):
     except: pass
     return candidates
 
+def is_chinese_input(text):
+    """Detect if input text contains Chinese characters."""
+    return bool(re.search(r'[\u4e00-\u9fff]', text))
+
 def analyze_with_agent(user_news, market_data):
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    is_cn = is_chinese_input(user_news)
     
-    market_context = f"""
-    ✅ **REAL-TIME POLYMARKET DATA FOUND**
-    - Market: {market_data['title']}
-    - Odds: {market_data['odds']}
-    - Volume: {market_data['volume']}
-    INSTRUCTION: Compare news claim against odds.
-    """ if market_data else "❌ **NO DIRECT PREDICTION MARKET FOUND**. Rely on logical inference."
+    # 1. Market Context Construction
+    if market_data:
+        if is_cn:
+            market_context = f"""
+            ✅ **已找到实时预测市场数据 (Polymarket)**
+            - **市场标题:** {market_data['title']}
+            - **当前赔率:** {market_data['odds']}
+            - **交易量:** {market_data['volume']} (代表真金白银的共识)
+            
+            **核心指令:** 请将新闻声称的内容与上述市场赔率进行对比。如果新闻说“某事发生了”，但市场赔率很低，那可能是假消息或市场存在巨大预期差。
+            """
+        else:
+            market_context = f"""
+            ✅ **REAL-TIME POLYMARKET DATA FOUND**
+            - Market: {market_data['title']}
+            - Odds: {market_data['odds']}
+            - Volume: {market_data['volume']}
+            
+            **INSTRUCTION:** Compare news claim against odds. If odds don't match the news sentiment, flag it as potential FUD or Opportunity.
+            """
+    else:
+        if is_cn:
+            market_context = "❌ **未找到直接相关的预测市场**。请依靠你的宏观分析能力和历史案例进行逻辑推演。"
+        else:
+            market_context = "❌ **NO DIRECT PREDICTION MARKET FOUND**. Rely on logical inference and historical precedents."
 
-    system_prompt = f"""
-    You are **Be Holmes**, a top-tier Hedge Fund Analyst.
-    Current Date: {current_date}
-    
-    TARGET: Analyze news input for TRUTH and INVESTMENT ALPHA.
-    
-    {market_context}
-    
-    --- ANALYSIS PROTOCOL ---
-    1. **REALITY AUDIT**: Assess source credibility and validate against Market Odds (if provided).
-    2. **SECOND-ORDER THINKING**: If true, what is the ripple effect?
-    3. **INVESTMENT TARGETS**: Identify Sectors, specific Tickers/Assets, and Direction.
-    
-    --- OUTPUT FORMAT (Markdown) ---
-    ### 🎯 Reality Verdict: [Verdict]
-    **Probability:** [0-100]%
-    *(Justification)*
-    
-    ### 🕵️‍♂️ Deep Dive
-    [Professional breakdown]
-    
-    ### 🚀 Investment Signals (Alpha)
-    * **📈 Bullish / Long:**
-        * **Sectors:** [List]
-        * **Tickers:** [List] - *Why*
-    * **📉 Bearish / Short:**
-        * **Assets:** [List]
-        * **Risk:** [Brief risk]
-    """
+    # 2. System Prompt Selection based on Language
+    if is_cn:
+        system_prompt = f"""
+        你不仅是 "Be Holmes"，更是一位顶级的对冲基金宏观策略师 (Hedge Fund Macro Strategist)。
+        当前日期: {current_date}
+        
+        **任务目标:** 分析用户输入的新闻，判断其真实性，并挖掘【投资 Alpha】。
+        
+        {market_context}
+        
+        --- 分析协议 ---
+        
+        1. **真相审计 (REALITY AUDIT)**: 
+           - 评估新闻来源可信度和情绪框架（是恐惧还是贪婪？）。
+           - 如果有市场赔率，必须以赔率为基准进行验证。
+        
+        2. **二阶思维 (SECOND-ORDER THINKING)**: 
+           - 如果新闻为真，直接影响是什么？
+           - 连锁反应是什么？（例如：芯片短缺 -> 汽车减产 -> 二手车涨价）
+        
+        3. **投资标的 (INVESTMENT TARGETS)**: 
+           - **板块 (Sectors)**: 明确指出受影响的行业。
+           - **具体标的 (Tickers)**: 必须列出股票/代币代码 (如 NVDA, BTC, 600519.SH)。
+           - **方向 (Direction)**: 看多 (Long) / 看空 (Short)。
+        
+        --- 输出格式 (必须使用 Markdown) ---
+        
+        ### 🎯 真相判定: [真相/炒作/虚假/不确定]
+        **概率:** [0-100]%
+        *(一句话理由，基于市场赔率或逻辑)*
+        
+        ### 🕵️‍♂️ 深度复盘
+        [专业、简练的事件拆解。2-3句话。]
+        
+        ### 🚀 投资信号 (Alpha)
+        * **📈 看多 (Bullish / Long):**
+            * **板块:** [列出板块]
+            * **标的:** [列出代码] - *简要理由*
+        * **📉 看空 (Bearish / Short):**
+            * **资产:** [列出资产]
+            * **风险:** [简述风险]
+            
+        *(免责声明：非投资建议，仅供信息参考。)*
+        """
+    else:
+        system_prompt = f"""
+        You are **Be Holmes**, a top-tier Hedge Fund Analyst.
+        Current Date: {current_date}
+        
+        TARGET: Analyze news input for TRUTH and INVESTMENT ALPHA.
+        
+        {market_context}
+        
+        --- ANALYSIS PROTOCOL ---
+        1. **REALITY AUDIT**: Assess source credibility and validate against Market Odds (if provided).
+        2. **SECOND-ORDER THINKING**: If true, what is the ripple effect?
+        3. **INVESTMENT TARGETS**: Identify Sectors, specific Tickers/Assets, and Direction.
+        
+        --- OUTPUT FORMAT (Markdown) ---
+        
+        ### 🎯 Reality Verdict: [Verdict]
+        **Probability:** [0-100]%
+        *(Justification)*
+        
+        ### 🕵️‍♂️ Deep Dive
+        [Professional breakdown]
+        
+        ### 🚀 Investment Signals (Alpha)
+        * **📈 Bullish / Long:**
+            * **Sectors:** [List]
+            * **Tickers:** [List] - *Why*
+        * **📉 Bearish / Short:**
+            * **Assets:** [List]
+            * **Risk:** [Brief risk]
+        """
     
     messages = [
         {"role": "user", "parts": [system_prompt]},
