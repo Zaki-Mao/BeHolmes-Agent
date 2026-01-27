@@ -589,7 +589,7 @@ def fetch_crypto_prices():
     
     return crypto_data[:8]  # 返回前8个
 
-# --- 🔥 C. Polymarket - 全球排名 + 双列 + 交易量排序 ---
+# --- 🔥 D. Polymarket - 全球排名 + 双列 + 交易量排序 ---
 @st.cache_data(ttl=120)
 def fetch_top_polymarkets(sort_by="volume", limit=20):
     """获取全球顶级预测市场
@@ -818,6 +818,10 @@ st.markdown("""
 
 # --- 4.1.5 Global Time Clock ---
 now_utc = datetime.datetime.now(datetime.timezone.utc)
+time_nyc = (now_utc - datetime.timedelta(hours=5)).strftime("%H:%M")
+time_lon = now_utc.strftime("%H:%M")
+time_abd = (now_utc + datetime.timedelta(hours=4)).strftime("%H:%M")
+time_bjs = (now_utc + datetime.timedelta(hours=8)).strftime("%H:%M")
 
 st.markdown(f"""
 <div style="
@@ -835,25 +839,25 @@ st.markdown(f"""
     <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
         <span style="font-size: 1.2rem; margin-bottom: 3px;">🗽</span>
         <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">New York</span>
-        <span style="color: #ef4444; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{(now_utc - datetime.timedelta(hours=5)).strftime("%H:%M")}</span>
+        <span style="color: #ef4444; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{time_nyc}</span>
     </div>
     
     <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
         <span style="font-size: 1.2rem; margin-bottom: 3px;">🇬🇧</span>
         <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">London</span>
-        <span style="color: #fbbf24; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{now_utc.strftime("%H:%M")}</span>
+        <span style="color: #fbbf24; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{time_lon}</span>
     </div>
     
     <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
         <span style="font-size: 1.2rem; margin-bottom: 3px;">🕌</span>
         <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">Abu Dhabi</span>
-        <span style="color: #10b981; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{(now_utc + datetime.timedelta(hours=4)).strftime("%H:%M")}</span>
+        <span style="color: #10b981; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{time_abd}</span>
     </div>
     
     <div style="display: flex; flex-direction: column; align-items: center; min-width: 120px;">
         <span style="font-size: 1.2rem; margin-bottom: 3px;">🇨🇳</span>
         <span style="color: #9ca3af; font-size: 0.7rem; margin-bottom: 2px;">Beijing</span>
-        <span style="color: #3b82f6; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{(now_utc + datetime.timedelta(hours=8)).strftime("%H:%M")}</span>
+        <span style="color: #3b82f6; font-size: 1.2rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">{time_bjs}</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -974,6 +978,7 @@ if not st.session_state.messages:
         
         # Fetch & Display News OR Crypto Prices
         all_news = fetch_categorized_news()
+        display_news = []  # 初始化变量
         
         # 特殊处理 Web3 分类 - 显示加密货币价格
         if st.session_state.news_category == "web3":
@@ -1021,7 +1026,6 @@ if not st.session_state.messages:
         # 其他分类显示新闻
         else:
             if st.session_state.news_category == "all":
-                display_news = []
                 # 从每个分类取更多新闻
                 for cat in ["politics", "tech", "general"]:  # 移除 web3
                     display_news.extend(all_news[cat][:10])  # 每个分类10条
