@@ -406,7 +406,7 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (ADAPTED & ROBUST - V1.4) ---
+# --- 🔥 C. Polymarket Fetcher (ADAPTED & ROBUST - V1.5) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
@@ -584,46 +584,98 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
     except Exception as e:
         return []
 
-def search_market_data_list(user_query):
+# --- 🔥 NEW: FACT CHECKER FUNCTION ---
+def verify_news_with_exa(query):
     """
-    Search Markets by Keyword - REVERTED TO OLD LOGIC + CRITICAL URL FIX
+    Searches EXA for the news topic itself (not just markets) to verify authenticity.
     """
-    if not EXA_AVAILABLE or not EXA_API_KEY: return []
-    candidates = []
+    if not EXA_AVAILABLE or not EXA_API_KEY: 
+        return "⚠️ 无法进行全网事实核查 (Exa API 未配置)。"
+    
     try:
         exa = Exa(EXA_API_KEY)
-        keywords = generate_keywords(user_query) 
-        
-        # INCREASED num_results back to 25 to cast a wider net
+        # Search for news articles published in the last 30 days
         search_resp = exa.search(
-            f"site:polymarket.com {keywords}",
-            num_results=25, 
+            query,
+            num_results=3,
             type="neural",
-            include_domains=["polymarket.com"]
+            use_autoprompt=True,
+            start_published_date=(datetime.datetime.now() - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
         )
         
-        seen_slugs = set()
-        for result in search_resp.results:
-            match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
-            if match:
-                # --- CRITICAL FIX START ---
-                # Remove query parameters (e.g., ?ref=...) which break the API
-                slug_raw = match.group(1)
-                slug = slug_raw.split('?')[0]
-                # --- CRITICAL FIX END ---
-                
-                if slug in seen_slugs: continue
-                seen_slugs.add(slug)
-                
-                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-                data = requests.get(api_url, timeout=5).json()
-                
-                if data and isinstance(data, list):
-                    market_data = process_polymarket_event(data[0])
-                    if market_data:
-                        candidates.append(market_data)
+        if not search_resp.results:
+            return "⚠️ **事实核查警报**：全网未搜索到与此事件直接相关的权威新闻报道。这可能是一则假新闻，或者是尚未被主流媒体报道的传闻。请保持高度怀疑。"
+            
+        articles = []
+        for r in search_resp.results:
+            date_str = r.published_date if r.published_date else "Recent"
+            articles.append(f"- [{r.title}]({r.url}) ({date_str})")
+            
+        articles_text = "\n".join(articles)
+        return f"✅ **全网事实核查 (Web Fact Check)**:\n{articles_text}\n\n(AI将基于上述搜索结果验证事件真实性)"
+    except Exception as e:
+        return f"⚠️ 事实核查服务暂时不可用: {str(e)}"
+
+def search_market_data_list(user_query):
+    """
+    Search Markets by Keyword - DUAL ENGINE (Exa + Direct API)
+    To fix issues when Exa is down or not indexing specific markets.
+    """
+    candidates = []
+    seen_slugs = set()
+    
+    # 1. Generate Keywords (Use the reliable older prompt)
+    keywords = generate_keywords(user_query) 
+    
+    # --- Engine A: Direct Polymarket API Search (Primary & Fast) ---
+    try:
+        # Search specifically for open markets matching keywords
+        direct_url = f"https://gamma-api.polymarket.com/events?q={keywords}&limit=10&closed=false"
+        direct_resp = requests.get(direct_url, timeout=5)
+        
+        if direct_resp.status_code == 200:
+            direct_data = direct_resp.json()
+            if isinstance(direct_data, list):
+                for event in direct_data:
+                    slug = event.get('slug')
+                    if slug and slug not in seen_slugs:
+                        market_data = process_polymarket_event(event)
+                        if market_data:
+                            candidates.append(market_data)
+                            seen_slugs.add(slug)
     except: pass
-    return candidates # Return all found
+
+    # --- Engine B: Exa Search (Secondary / Semantic Backup) ---
+    if EXA_AVAILABLE and EXA_API_KEY:
+        try:
+            exa = Exa(EXA_API_KEY)
+            search_resp = exa.search(
+                f"site:polymarket.com {keywords}",
+                num_results=15, 
+                type="neural",
+                include_domains=["polymarket.com"]
+            )
+            
+            for result in search_resp.results:
+                match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
+                if match:
+                    # Critical: Clean slug to avoid 404s from query params
+                    slug_raw = match.group(1)
+                    slug = slug_raw.split('?')[0]
+                    
+                    if slug in seen_slugs: continue
+                    seen_slugs.add(slug)
+                    
+                    api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                    data = requests.get(api_url, timeout=5).json()
+                    
+                    if data and isinstance(data, list):
+                        market_data = process_polymarket_event(data[0])
+                        if market_data:
+                            candidates.append(market_data)
+        except: pass
+    
+    return candidates
 
 # --- 🔥 D. AGENT LOGIC (REVERTED KEYWORDS + NEW CONTEXT) ---
 def generate_keywords(user_text):
@@ -645,7 +697,7 @@ def generate_market_context(market_data, is_cn=True):
     if not market_data:
         # Fallback if no market data is selected
         if is_cn:
-            return "❌ **无直接预测市场数据**。"
+            return "❌ **无直接预测市场数据** (No direct prediction market found)."
         else:
             return "❌ **NO DIRECT MARKET DATA**."
 
@@ -725,8 +777,15 @@ def get_agent_response(history, market_data):
     
     # 1. Market Context (Using NEW Logic)
     market_context = generate_market_context(market_data, is_cn)
+    
+    # 2. 🔥 NEW: Perform Web Fact Check (To catch fake news)
+    # We use the user's original query to search for actual news articles
+    fact_check_info = verify_news_with_exa(first_query)
+    
+    # Combine Fact Check + Market Data for the AI
+    combined_context = f"{fact_check_info}\n\n{market_context}"
 
-    # 2. System Prompt (PM Mode - STRICTLY UNCHANGED)
+    # 3. System Prompt (PM Mode - STRICTLY UNCHANGED TEXT, BUT WITH NEW DATA)
     if is_cn:
         system_prompt = f"""
         你是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
@@ -738,11 +797,11 @@ def get_agent_response(history, market_data):
         3. **强制链接:** 提到标的时必须加链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
         4. **语言强制:** **必须全程使用中文回答**。
 
-        {market_context}
+        {combined_context}
         
         --- 基金经理决策备忘录 ---
         
-        ### 0. 📰 新闻背景速览 (Context)
+        ### 0. 新闻背景速览 (Context)
         * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
@@ -790,7 +849,7 @@ def get_agent_response(history, market_data):
         3. **LINKS:** Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
         4. **LANGUAGE:** English Only.
 
-        {market_context}
+        {combined_context}
         
         --- INVESTMENT MEMORANDUM ---
         
