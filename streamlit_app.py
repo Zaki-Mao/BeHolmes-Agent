@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import json
@@ -69,12 +68,13 @@ for key, value in default_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ================= 🎨 4. UI THEME (CRIMSON MODE) =================
+# ================= 🎨 4. UI THEME (MOBILE OPTIMIZED VERSION) =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
+    /* === Global Background === */
     .stApp {
         background-image: linear-gradient(rgba(0, 0, 0, 0.92), rgba(20, 0, 0, 0.96)), 
                           url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
@@ -84,6 +84,16 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
+    /* === 📱 Mobile Layout Optimization === */
+    /* Reduce padding on mobile devices to maximize screen real estate */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 4rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    /* === Hero Title (Responsive) === */
     .hero-title {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
@@ -94,32 +104,41 @@ st.markdown("""
         margin-bottom: 5px;
         padding-top: 2vh;
         text-shadow: 0 0 30px rgba(220, 38, 38, 0.6);
+        line-height: 1.1;
     }
     .hero-subtitle {
         font-family: 'Plus Jakarta Sans', sans-serif;
         font-size: 1rem;
         color: #9ca3af; 
         text-align: center;
-        margin-bottom: 30px;
+        margin-bottom: 25px;
         font-weight: 400;
     }
+    
+    /* Adjust Title size for mobile */
+    @media (max-width: 600px) {
+        .hero-title { font-size: 2.2rem; letter-spacing: -1px; }
+        .hero-subtitle { font-size: 0.9rem; margin-bottom: 15px; }
+    }
 
-    /* Fixed Time Zone Bar */
+    /* === Fixed Time Zone Bar (Responsive) === */
     .world-clock-bar {
         display: flex; 
         justify-content: space-between; 
         background: rgba(0,0,0,0.5); 
-        padding: 8px 12px; 
+        padding: 8px 10px; 
         border-radius: 6px; 
         margin-bottom: 15px;
         border: 1px solid rgba(220, 38, 38, 0.2);
         font-family: 'JetBrains Mono', monospace;
+        flex-wrap: wrap; /* Wrap content on small screens */
+        gap: 5px;
     }
-    .clock-item { font-size: 0.75rem; color: #9ca3af; display: flex; align-items: center; gap: 6px; }
+    .clock-item { font-size: 0.7rem; color: #9ca3af; display: flex; align-items: center; gap: 4px; }
     .clock-item b { color: #e5e7eb; font-weight: 700; }
     .clock-time { color: #f87171; }
 
-    /* Category Tabs */
+    /* === Buttons === */
     div.stButton > button {
         background: linear-gradient(90deg, #991b1b 0%, #7f1d1d 100%) !important;
         color: white !important;
@@ -135,7 +154,7 @@ st.markdown("""
         transform: scale(1.02) !important;
     }
 
-    /* News Cards */
+    /* === News Cards (Responsive) === */
     .news-grid-card {
         background: rgba(20, 0, 0, 0.6);
         border: 1px solid rgba(255, 255, 255, 0.05);
@@ -148,6 +167,10 @@ st.markdown("""
         flex-direction: column;
         justify-content: space-between;
         transition: all 0.3s ease-in-out;
+    }
+    /* Mobile: Allow height to grow based on content */
+    @media (max-width: 600px) {
+        .news-grid-card { min-height: auto; margin-bottom: 10px; }
     }
     .news-grid-card:hover {
         background: rgba(40, 0, 0, 0.8);
@@ -175,7 +198,7 @@ st.markdown("""
         overflow: hidden;
     }
     
-    /* Market Card Modern */
+    /* === Market Card Modern (Responsive) === */
     .market-card-modern {
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -195,6 +218,11 @@ st.markdown("""
         justify-content: space-between;
         align-items: flex-start;
         margin-bottom: 10px;
+    }
+    /* Mobile: Stack title and volume if needed */
+    @media (max-width: 600px) {
+        .market-head { flex-direction: column; }
+        .market-title-mod { margin-bottom: 5px; }
     }
     .market-title-mod {
         font-size: 0.85rem;
@@ -234,7 +262,7 @@ st.markdown("""
     .yes-color { color: #10b981; }
     .no-color { color: #ef4444; }
 
-    /* Input Area */
+    /* === Input Area === */
     .stTextArea textarea {
         background-color: rgba(20, 0, 0, 0.6) !important;
         border: 1px solid #7f1d1d !important;
@@ -247,7 +275,7 @@ st.markdown("""
         box-shadow: 0 0 10px rgba(220, 38, 38, 0.4) !important;
     }
     
-    /* Analysis Card */
+    /* === Analysis Card === */
     .analysis-card {
         background: rgba(20, 0, 0, 0.8);
         border: 1px solid #7f1d1d;
@@ -257,14 +285,14 @@ st.markdown("""
         margin-bottom: 20px;
     }
     
-    /* Chat Input styling */
+    /* === Chat Input styling === */
     .stChatInput input {
         background-color: rgba(20, 0, 0, 0.6) !important;
         color: white !important;
         border: 1px solid #7f1d1d !important;
     }
 
-    /* Hub Button */
+    /* === Hub Button === */
     .hub-btn {
         display: flex;
         flex-direction: column;
@@ -300,21 +328,28 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
     
-    /* Global Trends Buttons (Fixed) */
-    .trend-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; justify-content: flex-start; }
+    /* === Global Trends Buttons (Fixed & Responsive) === */
+    .trend-row { 
+        display: flex; 
+        gap: 8px; 
+        flex-wrap: wrap; 
+        margin-bottom: 20px; 
+        justify-content: flex-start; 
+    }
     .trend-fixed-btn {
         background: rgba(220, 38, 38, 0.1);
         border: 1px solid rgba(220, 38, 38, 0.3);
         color: #fca5a5;
-        padding: 8px 16px;
+        padding: 6px 14px;
         border-radius: 6px;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         font-weight: 600;
         text-decoration: none;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         transition: all 0.2s;
+        white-space: nowrap; /* Prevent breaking inside button */
     }
     .trend-fixed-btn:hover {
         background: rgba(220, 38, 38, 0.4);
@@ -322,6 +357,13 @@ st.markdown("""
         border-color: #ef4444;
         transform: translateY(-2px);
     }
+    
+    /* Small screen tweaks */
+    @media (max-width: 400px) {
+        .trend-fixed-btn { font-size: 0.7rem; padding: 5px 10px; }
+        .hub-text { font-size: 0.7rem; }
+    }
+    
     .ex-link {
         font-size: 0.7rem; color: #6b7280; text-decoration: none; margin-top: 5px; display: block; text-align: right;
     }
