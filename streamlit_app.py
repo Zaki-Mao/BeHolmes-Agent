@@ -406,7 +406,7 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (V1.3 EXA FOCUSED & SUB-MARKETS) ---
+# --- 🔥 C. Polymarket Fetcher (ENHANCED - supports Sub-markets & Liquidity) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
@@ -585,23 +585,17 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
         return []
 
 def search_market_data_list(user_query):
-    """
-    Search Markets using STRICTLY EXA.AI (No fallback to generic API).
-    """
+    """Search Markets by Keyword - REVERTED TO OLD LOGIC"""
     if not EXA_AVAILABLE or not EXA_API_KEY: return []
     candidates = []
-    
-    # 1. Generate Keywords
-    keywords = generate_keywords(user_query)
-    if not keywords: return [] # If keyword gen fails, return empty to avoid random trending results
-
-    # 2. Exa Search ONLY
     try:
         exa = Exa(EXA_API_KEY)
+        keywords = generate_keywords(user_query) 
         
+        # INCREASED num_results back to 25 to cast a wider net
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=15, 
+            num_results=25, 
             type="neural",
             include_domains=["polymarket.com"]
         )
@@ -610,11 +604,10 @@ def search_market_data_list(user_query):
         for result in search_resp.results:
             match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
             if match:
-                slug = match.group(1).split('?')[0] # Clean slug
+                slug = match.group(1).split('?')[0] # Basic cleaning
                 if slug in seen_slugs: continue
                 seen_slugs.add(slug)
                 
-                # Precise Lookup by Slug
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
                 data = requests.get(api_url, timeout=5).json()
                 
@@ -623,41 +616,47 @@ def search_market_data_list(user_query):
                     if market_data:
                         candidates.append(market_data)
     except: pass
-    
-    return candidates # Return found results (or empty if none)
+    return candidates # Return all found
 
-# --- 🔥 D. AGENT LOGIC (V1.3 INTEGRATED) ---
+# --- 🔥 D. AGENT LOGIC (REVERTED KEYWORDS + NEW CONTEXT) ---
 def generate_keywords(user_text):
+    # REVERTED TO OLD (WORKING) PROMPT
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. **CRITICAL: Translate keywords to English if input is Chinese.** Return ONLY keywords separated by spaces. Input: {user_text}"
         resp = model.generate_content(prompt)
-        return resp.text.strip().replace('"', '').replace("'", "")
-    except: return ""
+        return resp.text.strip()
+    except: return user_text
 
 def is_chinese_input(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
 def generate_market_context(market_data, is_cn=True):
     """
-    根据Polymarket数据，生成增强版的市场背景解读。
+    根据Polymarket数据，生成增强版的市场背景解读 (DeepSeek Logic).
     """
     if not market_data:
-        return "❌ **无直接预测市场数据**。" if is_cn else "❌ **NO DIRECT MARKET DATA**."
+        # Fallback if no market data is selected
+        if is_cn:
+            return "❌ **无直接预测市场数据**。"
+        else:
+            return "❌ **NO DIRECT MARKET DATA**."
 
     # 假设 market_data 包含字段：title, probability, volume, liquidity, change_24h, url
     title = market_data.get('title', 'N/A')
     prob = market_data.get('probability', 0)  # 例如：0.72 表示72%
-    volume = market_data.get('vol_str', 'N/A') # Use formatted string from fetcher
+    # 这里我们传入 vol_str ($50M) 以保证显示美观
+    volume = market_data.get('vol_str', 'N/A') 
     liquidity = market_data.get('liquidity', 0)
     change_24h = market_data.get('change_24h', 0)  # 例如：0.05 表示概率上升5个百分点
     url = market_data.get('url', '#')
     
     # 动态判断文本
     trend_text = "上涨" if change_24h > 0 else "下跌" if change_24h < 0 else "持平"
-    trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
-    
     confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"  # 假设流动性阈值
+    
+    # English equivalents for English Mode
+    trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
     confidence_text_en = "High" if liquidity > 100000 else "Medium" if liquidity > 10000 else "Low"
 
     # --- Generate Sub-market String ---
@@ -736,7 +735,7 @@ def get_agent_response(history, market_data):
         
         --- 基金经理决策备忘录 ---
         
-        ### 0. 新闻背景速览 (Context)
+        ### 0. 📰 新闻背景速览 (Context)
         * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
@@ -796,7 +795,6 @@ def get_agent_response(history, market_data):
         * **Current Consensus**: What is currently Price-in by the market? Based on prediction market data, how does the market currently view this event? Is the market sentiment optimistic or pessimistic?
         * **The Gap**: What is your differentiated view?
         * **Other Market Signals**: If any, supplement with other relevant market data (e.g., related company stock prices, search indices, etc.).
-        
         
         ### 2. Multi-perspective Analysis (Multi-perspective Analysis)
         * **Proponent View**: List reasons supporting the event's occurrence and main supporters.
