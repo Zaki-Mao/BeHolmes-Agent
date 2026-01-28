@@ -406,7 +406,7 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (ADAPTED & ROBUST - V1.5) ---
+# --- 🔥 C. Polymarket Fetcher (ENHANCED - supports Sub-markets & Liquidity) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
@@ -801,7 +801,7 @@ def get_agent_response(history, market_data):
         
         --- 基金经理决策备忘录 ---
         
-        ### 0. 新闻背景速览 (Context)
+        ### 0. 📰 新闻背景速览 (Context)
         * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
@@ -821,7 +821,7 @@ def get_agent_response(history, market_data):
         * **专家观点***: 如有，汇总专家意见。
         
         ### 4. 影响分析 (Impact Analysis)
-        * **如果发生**:事件发生会带来哪些影响？（对行业、市场、社会等） -> 资产影响。
+        * **如果发生**:事件发生会带来哪些影响？（对行业、市场、社会等） -> Asset Impact。
         * **如果不发生**: 事件不发生会如何？若核心假设失效，最大回撤是多少？
         * **时间线**: 事件可能的时间线是怎么样的？
         
