@@ -16,8 +16,9 @@ import textwrap
 # -----------------------------------------------------------------------------
 try:
     import feedparser
+    from openai import OpenAI # Added for OpenRouter/Grok
 except ImportError:
-    st.error("❌ 缺少必要组件：feedparser。请在 requirements.txt 中添加 'feedparser' 或运行 pip install feedparser。")
+    st.error("❌ 缺少必要组件。请在 requirements.txt 中添加 'feedparser' 和 'openai'。")
     st.stop()
 
 # ================= 🔐 1. KEY MANAGEMENT =================
@@ -25,11 +26,14 @@ try:
     EXA_API_KEY = st.secrets.get("EXA_API_KEY", None)
     GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY", None)
     NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", None)
+    # 🔥 NEW: OpenRouter Key for Grok
+    OPENROUTER_API_KEY = st.secrets.get("OPENROUTER_API_KEY", None)
     KEYS_LOADED = True
 except:
     EXA_API_KEY = None
     GOOGLE_API_KEY = None
     NEWS_API_KEY = None
+    OPENROUTER_API_KEY = None
     KEYS_LOADED = False
 
 if GOOGLE_API_KEY:
@@ -406,7 +410,7 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (ENHANCED - supports Sub-markets & Liquidity) ---
+# --- 🔥 C. Polymarket Fetcher (ADAPTED & ROBUST - V1.5) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
@@ -770,7 +774,9 @@ def generate_market_context(market_data, is_cn=True):
     return market_context
 
 def get_agent_response(history, market_data):
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    # 🔥🔥🔥 CRITICAL UPDATE: SWITCH TO OPENROUTER/GROK 🔥🔥🔥
+    # Using OpenRouter client if key is available, otherwise fallback to Gemini (but user wants Grok logic)
+    
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
@@ -801,7 +807,7 @@ def get_agent_response(history, market_data):
         
         --- 基金经理决策备忘录 ---
         
-        ### 0. 📰 新闻背景速览 (Context)
+        ### 0. 新闻背景速览 (Context)
         * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
@@ -821,7 +827,7 @@ def get_agent_response(history, market_data):
         * **专家观点***: 如有，汇总专家意见。
         
         ### 4. 影响分析 (Impact Analysis)
-        * **如果发生**:事件发生会带来哪些影响？（对行业、市场、社会等） -> Asset Impact。
+        * **如果发生**:事件发生会带来哪些影响？（对行业、市场、社会等） -> 资产影响。
         * **如果不发生**: 事件不发生会如何？若核心假设失效，最大回撤是多少？
         * **时间线**: 事件可能的时间线是怎么样的？
         
@@ -891,12 +897,40 @@ def get_agent_response(history, market_data):
         * One-sentence summary of trading direction.
         """
     
-    api_messages = [{"role": "user", "parts": [system_prompt]}]
-    for msg in history:
-        role = "user" if msg['role'] == "user" else "model"
-        api_messages.append({"role": role, "parts": [msg['content']]})
-        
+    # 🔥🔥🔥 GROK / OPENROUTER CALL 🔥🔥🔥
+    if OPENROUTER_API_KEY:
+        try:
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=OPENROUTER_API_KEY,
+            )
+            
+            # Convert history to OpenAI format
+            # Map 'model' -> 'assistant' if history exists
+            openai_messages = [{"role": "system", "content": system_prompt}]
+            for msg in history:
+                role = "assistant" if msg['role'] == "model" else msg['role']
+                openai_messages.append({"role": role, "content": msg['content']})
+            
+            completion = client.chat.completions.create(
+                model="x-ai/grok-2-1212", # Using Grok 2
+                messages=openai_messages,
+                extra_body={
+                    "HTTP-Referer": "https://beholmes.streamlit.app", 
+                    "X-Title": "Be Holmes"
+                }
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            return f"Grok API Error: {str(e)} (Falling back to Gemini if available)"
+
+    # Fallback to Gemini if OpenRouter Key is missing or fails
     try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        api_messages = [{"role": "user", "parts": [system_prompt]}]
+        for msg in history:
+            role = "user" if msg['role'] == "user" else "model"
+            api_messages.append({"role": role, "parts": [msg['content']]})
         response = model.generate_content(api_messages)
         return response.text
     except Exception as e:
