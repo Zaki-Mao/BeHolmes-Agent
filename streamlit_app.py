@@ -44,7 +44,7 @@ except ImportError:
 
 # ================= 🕵️‍♂️ 2. SYSTEM CONFIGURATION =================
 st.set_page_config(
-    page_title="Be Holmes | Reality Check",
+    page_title="Be Holmes | News Analysis",
     page_icon="🕵️‍♂️",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -716,7 +716,7 @@ def get_agent_response(history, market_data):
 # ================= 🖥️ 6. MAIN LAYOUT =================
 
 # --- Header ---
-st.markdown('<div class="hero-title">Be Holmes</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">BeHolmes News Analysis</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-subtitle">Narrative vs. Reality Engine</div>', unsafe_allow_html=True)
 
 # --- Search Bar & Workflow ---
@@ -735,7 +735,7 @@ with s_mid:
     
     # === Step 1: SEARCH Button ===
     if st.session_state.search_stage == "input":
-        if st.button("🔍 Search Markets", use_container_width=True):
+        if st.button("Begin Analysis", use_container_width=True):
             if st.session_state.news_input_box:
                 st.session_state.user_news_text = st.session_state.news_input_box
                 with st.spinner("🕵️‍♂️ Hunting for prediction markets..."):
@@ -1011,3 +1011,4 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
+
