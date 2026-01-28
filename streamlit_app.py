@@ -735,7 +735,7 @@ def get_agent_response(history, market_data):
         
         --- 基金经理决策备忘录 ---
         
-        ### 0. 📰 新闻背景速览 (Context)
+        ### 0. 新闻背景速览 (Context)
         * **事件还原**: 用通俗语言概括发生了什么。
         * **背景知识**: 为什么这件事值得关注？
         
