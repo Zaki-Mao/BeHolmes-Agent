@@ -406,7 +406,7 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (V1.3 EXA FOCUSED) ---
+# --- 🔥 C. Polymarket Fetcher (V1.3 EXA FOCUSED & SUB-MARKETS) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
@@ -432,15 +432,19 @@ def process_polymarket_event(event):
         vol = float(m.get('volume', 0) or 0)
         if vol < 1000: return None # Filter Dead Markets
         
-        # --- Extract Data for Context ---
+        # --- NEW: Extract Data for Context Generator ---
+        # Liquidity
         liquidity = float(m.get('liquidity', 0) or 0)
+        
+        # 24h Price Change
         change_24h = float(m.get('oneDayPriceChange', 0) or m.get('priceChange24h', 0) or 0)
 
+        # Volume String Formatting
         if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
         elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
         else: vol_str = f"${vol:.0f}"
 
-        # 4. Parse Odds (Main Market)
+        # 4. Parse Odds (Robust)
         outcomes = json.loads(m.get('outcomes')) if isinstance(m.get('outcomes'), str) else m.get('outcomes')
         prices = json.loads(m.get('outcomePrices')) if isinstance(m.get('outcomePrices'), str) else m.get('outcomePrices')
         
@@ -449,6 +453,7 @@ def process_polymarket_event(event):
             for i, out in enumerate(outcomes):
                 if i < len(prices):
                     try:
+                        # Price is usually 0.72 in API, convert to percentage for list, keep decimal for context
                         raw_price = float(prices[i]) 
                         prob_percent = raw_price * 100
                         outcome_data.append((str(out), prob_percent, raw_price))
@@ -456,54 +461,84 @@ def process_polymarket_event(event):
         
         if not outcome_data: return None
 
-        # Sort by Probability
+        # Sort by Probability (High to Low)
         outcome_data.sort(key=lambda x: x[1], reverse=True)
+        
+        # Get Top Probability (0.0 - 1.0 format) for the Generator
         top_prob_decimal = outcome_data[0][2] 
         
+        # Format Top 3 Odds for Display
         top_odds = [f"{o}: {p:.1f}%" for o, p, r in outcome_data[:3]]
         odds_str = " | ".join(top_odds)
 
-        # 5. Extract Details for All Sub-Markets (CRITICAL FOR ANALYSIS)
+        # 5. Extract Details for All Sub-Markets (V1.3 UPGRADE)
         all_sub_markets = []
-        # We take up to 6 sub-markets to give the AI enough context
+        # We process the top 6 sub-markets to provide rich context
         for sub_m in markets_list[:6]:
             try:
-                # Extract basic data for sub-market
+                # Basic sub-market data
                 q_text = sub_m.get('question', title)
                 sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
                 sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
+                sub_vol = float(sub_m.get('volume', 0) or 0)
                 
-                # Find the highest probability option in this sub-market
+                # Determine top outcome for this sub-market
                 best_opt = ""
-                best_price = 0
+                best_price = 0.0
                 if sub_out and sub_pri:
                     temp_ops = []
                     for i, o in enumerate(sub_out):
                         if i < len(sub_pri):
-                            temp_ops.append((o, float(sub_pri[i])))
+                            try:
+                                p_val = float(sub_pri[i])
+                                temp_ops.append((o, p_val))
+                            except: continue
                     temp_ops.sort(key=lambda x: x[1], reverse=True)
                     if temp_ops:
                         best_opt = temp_ops[0][0]
                         best_price = temp_ops[0][1]
-                
-                all_sub_markets.append({
+
+                # Structure for UI
+                sub_data = {
                     "question": q_text,
+                    "volume": sub_vol,
+                    "type": "binary" if len(sub_out) == 2 else "multiple",
+                    "options": [],
+                    # Extra fields for Context Generator
                     "top_option": best_opt,
                     "top_price": best_price
-                })
+                }
+                
+                # Fill options for UI
+                if len(sub_out) == 2 and "Yes" in sub_out and "No" in sub_out:
+                    y_idx = sub_out.index("Yes")
+                    n_idx = sub_out.index("No")
+                    sub_data['yes_price'] = float(sub_pri[y_idx]) * 100 if y_idx < len(sub_pri) else 0
+                    sub_data['no_price'] = float(sub_pri[n_idx]) * 100 if n_idx < len(sub_pri) else 0
+                else:
+                    for i, o in enumerate(sub_out):
+                        if i < len(sub_pri):
+                            sub_data['options'].append({
+                                "option": str(o), 
+                                "price": float(sub_pri[i]) * 100
+                            })
+                all_sub_markets.append(sub_data)
             except: continue
 
+        # Return standardized dict matching generate_market_context requirements
         return {
             "title": title,
             "slug": event.get('slug', ''),
             "volume": vol,
-            "vol_str": vol_str, 
+            "vol_str": vol_str, # This is the formatted string (e.g. $50M)
             "odds": odds_str,
             "url": f"https://polymarket.com/event/{event.get('slug', '')}",
-            "markets": all_sub_markets, # Passing the list for Context Generator
-            "probability": top_prob_decimal, 
-            "liquidity": liquidity,          
-            "change_24h": change_24h         
+            "markets": all_sub_markets,
+            
+            # Fields specifically for generate_market_context:
+            "probability": top_prob_decimal, # 0.72
+            "liquidity": liquidity,          # 150000.0
+            "change_24h": change_24h         # 0.05
         }
     except: return None
 
@@ -511,14 +546,25 @@ def process_polymarket_event(event):
 def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
     """
     Fetch Top Markets for Homepage.
+    Supports server-side sorting with robust fallback.
     """
     try:
         base_url = "https://gamma-api.polymarket.com/events?closed=false"
-        if sort_mode == 'volume': api_url = f"{base_url}&limit=500" 
-        else: api_url = f"{base_url}&limit=50"
+        
+        # 1. Attempt API Sorting (Try sorting by volume or liquidity)
+        if sort_mode == 'volume':
+            # Try getting top liquidity/volume events (API dependent)
+            # Increased limit to 500 to catch old whales if API sort fails
+            api_url = f"{base_url}&limit=500" 
+        else:
+            # Active/Trending
+            api_url = f"{base_url}&limit=50"
 
         resp = requests.get(api_url, timeout=12) 
-        if resp.status_code != 200: return []
+        
+        # Fallback if API fails
+        if resp.status_code != 200:
+            return []
 
         data = resp.json()
         markets = []
@@ -529,8 +575,10 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
                 if market_data:
                     markets.append(market_data)
         
+        # 2. Strong Local Sort (Crucial for "Volume" view)
         if sort_mode == 'volume':
             markets.sort(key=lambda x: x['volume'], reverse=True)
+        # 'active' usually implies the default API return order (Trending)
             
         return markets[:limit]
     except Exception as e:
@@ -538,58 +586,51 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
 
 def search_market_data_list(user_query):
     """
-    STRICTLY USES EXA.AI for search to ensure accuracy.
+    Search Markets using STRICTLY EXA.AI (No fallback to generic API).
     """
-    if not user_query or not EXA_AVAILABLE or not EXA_API_KEY: 
-        return []
-        
+    if not EXA_AVAILABLE or not EXA_API_KEY: return []
     candidates = []
-    seen_slugs = set()
     
-    # 1. Generate Keywords (Short & Precise)
+    # 1. Generate Keywords
     keywords = generate_keywords(user_query)
-    if not keywords: return []
+    if not keywords: return [] # If keyword gen fails, return empty to avoid random trending results
 
-    # 2. EXA SEARCH ONLY (No fallback to generic API)
+    # 2. Exa Search ONLY
     try:
         exa = Exa(EXA_API_KEY)
-        # Search for the specific event URL on Polymarket
+        
         search_resp = exa.search(
             f"site:polymarket.com {keywords}",
-            num_results=10, 
-            type="neural", # Semantic search matches meaning, not just keywords
+            num_results=15, 
+            type="neural",
             include_domains=["polymarket.com"]
         )
         
+        seen_slugs = set()
         for result in search_resp.results:
-            # Extract Slug from URL
             match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
             if match:
-                slug = match.group(1).split('?')[0] # Remove query params
-                
+                slug = match.group(1).split('?')[0] # Clean slug
                 if slug in seen_slugs: continue
                 seen_slugs.add(slug)
                 
-                # Fetch details using the specific slug found by Exa
+                # Precise Lookup by Slug
                 api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-                data = requests.get(api_url, timeout=4).json()
+                data = requests.get(api_url, timeout=5).json()
                 
                 if data and isinstance(data, list):
                     market_data = process_polymarket_event(data[0])
                     if market_data:
                         candidates.append(market_data)
-    except Exception as e:
-        print(f"Exa Error: {e}")
-        pass
+    except: pass
     
-    return candidates
+    return candidates # Return found results (or empty if none)
 
-# --- 🔥 D. AGENT LOGIC (WITH SUB-MARKETS) ---
+# --- 🔥 D. AGENT LOGIC (V1.3 INTEGRATED) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        # Instruct Gemini to extract the core entity to match Exa's strengths
-        prompt = f"Extract the SINGLE most important search term (English) for this news. Input: {user_text}. Output ONLY the term."
+        prompt = f"Extract 2-3 most critical keywords from this news to search on a prediction market. **CRITICAL: Translate keywords to English if input is Chinese.** Return ONLY keywords separated by spaces. Input: {user_text}"
         resp = model.generate_content(prompt)
         return resp.text.strip().replace('"', '').replace("'", "")
     except: return ""
@@ -599,29 +640,36 @@ def is_chinese_input(text):
 
 def generate_market_context(market_data, is_cn=True):
     """
-    Generates context including SUB-MARKET analysis.
+    根据Polymarket数据，生成增强版的市场背景解读。
     """
     if not market_data:
         return "❌ **无直接预测市场数据**。" if is_cn else "❌ **NO DIRECT MARKET DATA**."
 
+    # 假设 market_data 包含字段：title, probability, volume, liquidity, change_24h, url
     title = market_data.get('title', 'N/A')
-    prob = market_data.get('probability', 0)
-    volume = market_data.get('vol_str', 'N/A')
+    prob = market_data.get('probability', 0)  # 例如：0.72 表示72%
+    volume = market_data.get('vol_str', 'N/A') # Use formatted string from fetcher
     liquidity = market_data.get('liquidity', 0)
-    change_24h = market_data.get('change_24h', 0)
+    change_24h = market_data.get('change_24h', 0)  # 例如：0.05 表示概率上升5个百分点
     url = market_data.get('url', '#')
     
-    # 1. Basic Stats
+    # 动态判断文本
     trend_text = "上涨" if change_24h > 0 else "下跌" if change_24h < 0 else "持平"
-    confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"
+    trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
     
-    # 2. Sub-Market Logic (NEW)
+    confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"  # 假设流动性阈值
+    confidence_text_en = "High" if liquidity > 100000 else "Medium" if liquidity > 10000 else "Low"
+
+    # --- Generate Sub-market String ---
     sub_markets_str = ""
     if market_data.get('markets'):
         sub_items = []
         for sm in market_data['markets']:
-            # Format: "Question: Top Option (Price)"
-            item = f"- **{sm['question']}**: 目前倾向于 **{sm['top_option']}** (概率: {sm['top_price']*100:.1f}%)"
+            # Safe get for sub-market fields
+            q = sm.get('question', 'Sub-market')
+            top = sm.get('top_option', 'N/A')
+            price = sm.get('top_price', 0) * 100
+            item = f"- **{q}**: 倾向于 **{top}** ({price:.1f}%)" if is_cn else f"- **{q}**: Leaning **{top}** ({price:.1f}%)"
             sub_items.append(item)
         sub_markets_str = "\n".join(sub_items)
 
@@ -629,7 +677,7 @@ def generate_market_context(market_data, is_cn=True):
         market_context = f"""
 ### ✅ 市场真实资金共识（来自Polymarket）
 
-**📊 主市场核心指标**
+**📊 核心指标速览**
 * **预测问题：** [{title}]({url})
 * **当前隐含概率：** **{prob:.0%}** （较24小时前 **{trend_text} {abs(change_24h):.1%}**）
 * **市场流动性：** ${liquidity:,.0f} （共识置信度：**{confidence_text}**）
@@ -639,25 +687,27 @@ def generate_market_context(market_data, is_cn=True):
 {sub_markets_str}
 
 **💡 你的新闻共识探测器解读**
-1. **市场定价 vs. 新闻情绪**：当前主市场认为此事发生的可能性为 **{prob:.0%}**。
-2. **多维度验证**：请结合上述细分市场的数据（Sub-Markets）来判断是否存在局部热度或特定时间点的预期差。
-3. **使用建议**：将 **{prob:.0%}** 作为判断新闻可信度的**中性基准**。
+1. **市场定价 vs. 新闻情绪**：当前市场认为此事发生的可能性为 **{prob:.0%}**。如果你的新闻源显得更乐观或更悲观，就存在值得探究的“预期差”。
+2. **共识强度与趋势**：市场信心正在 **{trend_text}**，且流动性水平表明该共识的可靠性 **{confidence_text}**。
+3. **使用建议**：可将此 **{prob:.0%}** 的概率作为你判断该新闻可信度的**中性基准**。若新闻观点与此概率偏离极大，请务必警惕并寻找更多佐证。
 """
     else:
-        # Simplified English fallback
         market_context = f"""
-### ✅ Real-Money Market Consensus
+### ✅ Real-Money Market Consensus (via Polymarket)
 
 **📊 Key Metrics**
 * **Market:** [{title}]({url})
-* **Probability:** **{prob:.0%}**
-* **Liquidity:** ${liquidity:,.0f} ({confidence_text})
+* **Implied Probability:** **{prob:.0%}** ({trend_text_en} {abs(change_24h):.1%} in 24h)
+* **Market Liquidity:** ${liquidity:,.0f} (Confidence: **{confidence_text_en}**)
+* **Recent Volume:** {volume}
 
 **🧩 Sub-Market Context**
 {sub_markets_str}
 
-**💡 Consensus Detector**
-Market prices a **{prob:.0%}** chance. Use this and the sub-market details above as your reality check baseline.
+**💡 Your Consensus Detector's Take**
+1. **Market vs. News Hype:** The market prices a **{prob:.0%}** chance. Any significant deviation in your news source suggests a **mispricing** to investigate.
+2. **Strength & Trend:** Consensus is **{trend_text_en}**, with **{confidence_text_en}** reliability due to liquidity.
+3. **How to Use This:** Treat **{prob:.0%}** as your **neutral baseline** for credibility. Be skeptical if news narratives deviate wildly from this anchor.
 """
     return market_context
 
@@ -667,10 +717,10 @@ def get_agent_response(history, market_data):
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # 1. Market Context (With Sub-markets)
+    # 1. Market Context (Using NEW Logic)
     market_context = generate_market_context(market_data, is_cn)
 
-    # 2. System Prompt (STRICTLY UNCHANGED AS REQUESTED)
+    # 2. System Prompt (PM Mode - STRICTLY UNCHANGED)
     if is_cn:
         system_prompt = f"""
         你是一位管理亿级美元资金的 **全球宏观对冲基金经理 (Global Macro PM)**。
@@ -746,6 +796,7 @@ def get_agent_response(history, market_data):
         * **Current Consensus**: What is currently Price-in by the market? Based on prediction market data, how does the market currently view this event? Is the market sentiment optimistic or pessimistic?
         * **The Gap**: What is your differentiated view?
         * **Other Market Signals**: If any, supplement with other relevant market data (e.g., related company stock prices, search indices, etc.).
+        
         
         ### 2. Multi-perspective Analysis (Multi-perspective Analysis)
         * **Proponent View**: List reasons supporting the event's occurrence and main supporters.
@@ -1085,4 +1136,3 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
-
