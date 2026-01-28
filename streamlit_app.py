@@ -60,20 +60,20 @@ default_state = {
     "is_processing": False,
     "last_user_input": "",
     "news_category": "all",
-    "market_sort": "volume",
-    "debug_logs": []             # Store debug info
+    "market_sort": "volume"
 }
 
 for key, value in default_state.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ================= 🎨 4. UI THEME (CRIMSON MODE) =================
+# ================= 🎨 4. UI THEME (MOBILE OPTIMIZED) =================
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
+    /* === Global Reset & Mobile First Tweaks === */
     .stApp {
         background-image: linear-gradient(rgba(0, 0, 0, 0.92), rgba(20, 0, 0, 0.96)), 
                           url('https://upload.cc/i1/2026/01/20/s8pvXA.jpg');
@@ -83,6 +83,15 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
+    /* Optimize main container padding for mobile */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 4rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    /* === Hero Title === */
     .hero-title {
         font-family: 'Inter', sans-serif;
         font-weight: 700;
@@ -93,32 +102,41 @@ st.markdown("""
         margin-bottom: 5px;
         padding-top: 2vh;
         text-shadow: 0 0 30px rgba(220, 38, 38, 0.6);
+        line-height: 1.1;
     }
     .hero-subtitle {
         font-family: 'Plus Jakarta Sans', sans-serif;
         font-size: 1rem;
         color: #9ca3af; 
         text-align: center;
-        margin-bottom: 30px;
+        margin-bottom: 20px;
         font-weight: 400;
     }
 
-    /* Fixed Time Zone Bar */
+    /* Mobile Breakpoint for Title */
+    @media (max-width: 600px) {
+        .hero-title { font-size: 2.2rem; letter-spacing: -1px; }
+        .hero-subtitle { font-size: 0.9rem; margin-bottom: 15px; }
+    }
+
+    /* === Fixed Time Zone Bar === */
     .world-clock-bar {
         display: flex; 
         justify-content: space-between; 
         background: rgba(0,0,0,0.5); 
-        padding: 8px 12px; 
+        padding: 8px 10px; 
         border-radius: 6px; 
         margin-bottom: 15px;
         border: 1px solid rgba(220, 38, 38, 0.2);
         font-family: 'JetBrains Mono', monospace;
+        flex-wrap: wrap; /* Allow wrap on very small screens */
+        gap: 5px;
     }
-    .clock-item { font-size: 0.75rem; color: #9ca3af; display: flex; align-items: center; gap: 6px; }
+    .clock-item { font-size: 0.7rem; color: #9ca3af; display: flex; align-items: center; gap: 4px; }
     .clock-item b { color: #e5e7eb; font-weight: 700; }
     .clock-time { color: #f87171; }
 
-    /* Category Tabs */
+    /* === Buttons === */
     div.stButton > button {
         background: linear-gradient(90deg, #991b1b 0%, #7f1d1d 100%) !important;
         color: white !important;
@@ -134,7 +152,7 @@ st.markdown("""
         transform: scale(1.02) !important;
     }
 
-    /* News Cards */
+    /* === News Cards === */
     .news-grid-card {
         background: rgba(20, 0, 0, 0.6);
         border: 1px solid rgba(255, 255, 255, 0.05);
@@ -147,6 +165,10 @@ st.markdown("""
         flex-direction: column;
         justify-content: space-between;
         transition: all 0.3s ease-in-out;
+    }
+    /* Mobile: Allow height to grow */
+    @media (max-width: 600px) {
+        .news-grid-card { min-height: auto; margin-bottom: 10px; }
     }
     .news-grid-card:hover {
         background: rgba(40, 0, 0, 0.8);
@@ -174,7 +196,7 @@ st.markdown("""
         overflow: hidden;
     }
     
-    /* Market Card Modern */
+    /* === Market Card Modern === */
     .market-card-modern {
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -195,8 +217,13 @@ st.markdown("""
         align-items: flex-start;
         margin-bottom: 10px;
     }
+    /* Mobile: Stack market info if title is long */
+    @media (max-width: 600px) {
+        .market-head { flex-direction: column; }
+        .market-title-mod { margin-bottom: 5px; }
+    }
     .market-title-mod {
-        font-size: 0.85rem;
+        font-size: 0.9rem;
         color: #e5e7eb;
         font-weight: 600;
         line-height: 1.3;
@@ -212,28 +239,8 @@ st.markdown("""
         border-radius: 4px;
         font-family: 'JetBrains Mono', monospace;
     }
-    .outcome-row {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-    }
-    .outcome-box {
-        flex: 1;
-        padding: 8px;
-        border-radius: 6px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-family: 'JetBrains Mono', monospace;
-    }
-    .outcome-box.yes { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); }
-    .outcome-box.no { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); }
-    .outcome-label { font-size: 0.75rem; font-weight: 600; }
-    .outcome-price { font-size: 1rem; font-weight: 700; }
-    .yes-color { color: #10b981; }
-    .no-color { color: #ef4444; }
 
-    /* Input Area */
+    /* === Input Area === */
     .stTextArea textarea {
         background-color: rgba(20, 0, 0, 0.6) !important;
         border: 1px solid #7f1d1d !important;
@@ -246,24 +253,14 @@ st.markdown("""
         box-shadow: 0 0 10px rgba(220, 38, 38, 0.4) !important;
     }
     
-    /* Analysis Card */
-    .analysis-card {
-        background: rgba(20, 0, 0, 0.8);
-        border: 1px solid #7f1d1d;
-        border-radius: 12px;
-        padding: 20px;
-        margin-top: 20px;
-        margin-bottom: 20px;
-    }
-    
-    /* Chat Input styling */
+    /* === Chat Input === */
     .stChatInput input {
         background-color: rgba(20, 0, 0, 0.6) !important;
         color: white !important;
         border: 1px solid #7f1d1d !important;
     }
 
-    /* Hub Button */
+    /* === Hub Button (Footer) === */
     .hub-btn {
         display: flex;
         flex-direction: column;
@@ -289,7 +286,6 @@ st.markdown("""
     }
     .hub-content { display: flex; flex-direction: column; align-items: center; }
     .hub-emoji { font-size: 1.4rem; line-height: 1.2; margin-bottom: 4px; filter: grayscale(0.2); }
-    .hub-btn:hover .hub-emoji { filter: grayscale(0); transform: scale(1.1); transition: transform 0.2s;}
     .hub-text { 
         font-family: 'Inter', sans-serif;
         font-size: 0.8rem; 
@@ -299,21 +295,28 @@ st.markdown("""
     }
     .hub-btn:hover .hub-text { color: #ffffff; }
     
-    /* Global Trends Buttons (Fixed) */
-    .trend-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; justify-content: flex-start; }
+    /* === Trends Row (Mobile Wrap) === */
+    .trend-row { 
+        display: flex; 
+        gap: 8px; 
+        flex-wrap: wrap; 
+        margin-bottom: 20px; 
+        justify-content: flex-start; 
+    }
     .trend-fixed-btn {
         background: rgba(220, 38, 38, 0.1);
         border: 1px solid rgba(220, 38, 38, 0.3);
         color: #fca5a5;
-        padding: 8px 16px;
+        padding: 6px 12px;
         border-radius: 6px;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         font-weight: 600;
         text-decoration: none;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         transition: all 0.2s;
+        white-space: nowrap; /* Prevent breaking inside button */
     }
     .trend-fixed-btn:hover {
         background: rgba(220, 38, 38, 0.4);
@@ -321,10 +324,11 @@ st.markdown("""
         border-color: #ef4444;
         transform: translateY(-2px);
     }
-    .ex-link {
-        font-size: 0.7rem; color: #6b7280; text-decoration: none; margin-top: 5px; display: block; text-align: right;
+    
+    /* Hide some elements on very small screens if needed */
+    @media (max-width: 400px) {
+        .trend-fixed-btn { font-size: 0.7rem; padding: 5px 10px; }
     }
-    .ex-link:hover { color: #ef4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -589,7 +593,7 @@ def fetch_polymarket_v5_simple(limit=60, sort_mode='volume'):
 def verify_news_with_exa(query):
     """
     Searches EXA for the news topic itself (not just markets) to verify authenticity.
-    Uses 'auto' type which is the most robust.
+    SIMPLIFIED: Removed aggressive filtering parameters to ensure compatibility with all Exa plans.
     """
     if not EXA_AVAILABLE or not EXA_API_KEY: 
         return "⚠️ 无法进行全网事实核查 (Exa API 未配置)。"
@@ -602,7 +606,8 @@ def verify_news_with_exa(query):
         
         search_resp = exa.search(
             search_query,
-            num_results=3
+            num_results=3,
+            type="neural"
         )
         
         if not search_resp.results:
@@ -610,36 +615,36 @@ def verify_news_with_exa(query):
             
         articles = []
         for r in search_resp.results:
-            title = getattr(r, 'title', 'Article')
+            # Handle potential missing attributes gracefully
+            date_str = getattr(r, 'published_date', 'Recent')
+            title = getattr(r, 'title', 'News Article')
             url = getattr(r, 'url', '#')
-            # Extract domain
-            domain = urllib.parse.urlparse(url).netloc.replace('www.', '')
-            articles.append(f"- [{title}]({url}) (Via {domain})")
+            articles.append(f"- [{title}]({url}) ({date_str})")
             
         articles_text = "\n".join(articles)
         return f"✅ **全网事实核查 (Web Fact Check)**:\n{articles_text}\n\n(AI将基于上述搜索结果验证事件真实性)"
     except Exception as e:
-        st.session_state.debug_logs.append(f"Exa Fact Check Failed: {str(e)}")
-        return f"⚠️ 事实核查服务暂时不可用 (Connection Error)"
+        return f"⚠️ 事实核查服务暂时不可用: {str(e)}"
 
 def search_market_data_list(user_query):
     """
-    Search Markets with:
-    1. Keyword Generation (Translate & Simplify)
-    2. Dual Engine Search (API + Exa)
-    3. Strict Filtering (Remove irrelevant junk)
+    Search Markets with Fallback Logic to handle missing keywords.
     """
     candidates = []
     seen_slugs = set()
     
-    # 1. Generate Keywords (Crucial: Translate "SpaceX上市" -> "SpaceX IPO")
+    # 1. Generate English Keywords (Crucial for Chinese inputs)
     keywords = generate_keywords(user_query) 
     
     # Define search terms: [Generated Keywords, Raw Input]
     search_terms = []
     if keywords: search_terms.append(keywords)
-    
+    # If keywords look like a sentence, also try just the first few words as a broad search
+    if keywords and len(keywords.split()) > 3:
+         search_terms.append(" ".join(keywords.split()[:2])) 
+
     # --- Engine A: Direct Polymarket API Search ---
+    # This is the fastest way if we have a good keyword
     for term in search_terms:
         if not term: continue
         try:
@@ -651,33 +656,31 @@ def search_market_data_list(user_query):
                 direct_data = direct_resp.json()
                 if isinstance(direct_data, list):
                     for event in direct_data:
-                        # 🛡️ FILTER: Title must match keywords roughly
-                        title = event.get('title', '').lower()
-                        kw_lower = term.lower()
-                        # Simple relevance check: at least one significant word must match
-                        if any(w in title for w in kw_lower.split() if len(w)>3):
-                            slug = event.get('slug')
-                            if slug and slug not in seen_slugs:
-                                market_data = process_polymarket_event(event)
-                                if market_data:
-                                    candidates.append(market_data)
-                                    seen_slugs.add(slug)
+                        slug = event.get('slug')
+                        if slug and slug not in seen_slugs:
+                            market_data = process_polymarket_event(event)
+                            if market_data:
+                                candidates.append(market_data)
+                                seen_slugs.add(slug)
         except: pass
     
     # --- Engine B: Exa Search (Secondary) ---
-    # Only run if API gave few results
+    # Only run if we have fewer than 5 results from direct API
     if EXA_AVAILABLE and EXA_API_KEY and len(candidates) < 5 and keywords:
         try:
             exa = Exa(EXA_API_KEY)
-            # Search specifically for Polymarket pages
+            # Simplified Exa call here too
             search_resp = exa.search(
                 f"site:polymarket.com {keywords}",
-                num_results=10
+                num_results=15, 
+                type="neural",
+                include_domains=["polymarket.com"]
             )
             
             for result in search_resp.results:
                 match = re.search(r'polymarket\.com/event/([^/]+)', result.url)
                 if match:
+                    # Critical: Clean slug to avoid 404s
                     slug_raw = match.group(1)
                     slug = slug_raw.split('?')[0]
                     
@@ -688,21 +691,18 @@ def search_market_data_list(user_query):
                     data = requests.get(api_url, timeout=5).json()
                     
                     if data and isinstance(data, list):
-                        # 🛡️ FILTER HERE TOO
-                        title = data[0].get('title', '').lower()
-                        if any(w in title for w in keywords.lower().split() if len(w)>3):
-                            market_data = process_polymarket_event(data[0])
-                            if market_data:
-                                candidates.append(market_data)
-        except Exception as e:
-            st.session_state.debug_logs.append(f"Exa Market Search Failed: {str(e)}")
+                        market_data = process_polymarket_event(data[0])
+                        if market_data:
+                            candidates.append(market_data)
+        except: pass
     
     return candidates
 
-# --- 🔥 D. AGENT LOGIC (GEMINI) ---
+# --- 🔥 D. AGENT LOGIC ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
+        # Explicit instruction to translate and simplify
         prompt = f"Translate this news topic into 2-3 simple English keywords for searching on Polymarket. Example: 'SpaceX上市' -> 'SpaceX IPO'. Input: {user_text}"
         resp = model.generate_content(prompt)
         return resp.text.strip()
@@ -787,7 +787,7 @@ def get_agent_response(history, market_data):
     # 1. Market Context
     market_context = generate_market_context(market_data, is_cn)
     
-    # 2. 🔥 Fact Check via Exa (Simplified call)
+    # 2. 🔥 Fact Check via Exa (Using cleaned up function)
     fact_check_info = verify_news_with_exa(first_query)
     
     combined_context = f"{fact_check_info}\n\n{market_context}"
@@ -923,7 +923,6 @@ with s_mid:
     def on_input_change():
         st.session_state.search_stage = "input"
         st.session_state.search_candidates = []
-        st.session_state.debug_logs = [] # Clear logs
         
     input_val = st.session_state.get("user_news_text", "")
     # Use a unique key for the text area to allow programmatic clearing if needed, though we sync state
@@ -947,9 +946,9 @@ with s_mid:
     elif st.session_state.search_stage == "selection":
         st.markdown("##### 🧐 Select a Market to Reality Check:")
         
-        # 🔥 UI FIX: Clearly show when no markets are found and offer News Analysis
+        # 🔥 FIX: 如果没找到市场，优先显示"直接分析"按钮
         if not st.session_state.search_candidates:
-            st.warning("⚠️ No direct prediction markets found matching your specific query.")
+            st.warning("⚠️ No direct prediction markets found for this news.")
             st.markdown("---")
             if st.button("📝 Analyze News Only (AI Fact Check + Analysis)", use_container_width=True, type="primary"):
                 st.session_state.current_market = None
@@ -961,8 +960,9 @@ with s_mid:
                 st.session_state.search_stage = "input"
                 st.rerun()
         else:
-            # Loop through candidates
+            # 有市场时，先显示市场列表
             for idx, m in enumerate(st.session_state.search_candidates):
+                # Native Container with Styling
                 with st.container():
                     st.markdown(f"""
                     <div style="padding:12px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid rgba(255,255,255,0.1); margin-bottom:10px;">
