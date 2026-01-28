@@ -877,14 +877,22 @@ def get_agent_response(history, market_data):
         * **时间线**: 事件可能的时间线是怎么样的？
         
         ### 5. 交易执行 (The Trade Book)
+        
+        #### A. 预测市场策略 (Prediction Market Alpha)
+        * **Polymarket 标的**: [引用上方提供的市场名称]
+        * **操作建议**: **买入 YES** / **买入 NO** / **观望**
+        * **价格策略**: 
+            * 当前价格: [填入价格]
+            * 目标入场价: [建议价格]
+            * **胜率赔率分析 (EV)**: (例如："当前价格30¢暗示30%概率，但我基于新闻判断实际概率为60%，存在巨大的正期望值。")
+        
+        #### B. 传统金融市场 (TradFi / Crypto)
         * **核心多头 (Long)**:
-            * **标的**: [代码+链接]
-            * **头寸**: 建议仓位。
-            * **逻辑**: 为什么买它？
+            * **标的**: [代码+链接] (如相关股票或Token)
+            * **逻辑**: 为什么这个资产会因为该新闻受益？
         * **核心空头/对冲 (Short/Hedge)**:
             * **标的**: [代码+链接]
             * **逻辑**: 对冲什么风险？
-        * **⏳ 期限**: 持仓多久？
             
         ### 6. 最终指令 (PM Conclusion)
         * 一句话总结交易方向。
@@ -1265,3 +1273,4 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
+
