@@ -406,11 +406,11 @@ def fetch_categorized_news_v2():
     }
     return {k: fetch_rss(v, 30) for k, v in feeds.items()}
 
-# --- 🔥 C. Polymarket Fetcher (UNIFIED & ROBUST) ---
+# --- 🔥 C. Polymarket Fetcher (ADAPTED & ROBUST) ---
 def process_polymarket_event(event):
     """
     Core function to process ANY Polymarket event.
-    Returns standardized data structure.
+    Returns standardized data structure tailored for generate_market_context.
     """
     try:
         title = event.get('title', 'Untitled').strip()
@@ -432,6 +432,14 @@ def process_polymarket_event(event):
         vol = float(m.get('volume', 0) or 0)
         if vol < 1000: return None # Filter Dead Markets
         
+        # --- NEW: Extract Data for Context Generator ---
+        # Liquidity
+        liquidity = float(m.get('liquidity', 0) or 0)
+        
+        # 24h Price Change
+        change_24h = float(m.get('oneDayPriceChange', 0) or m.get('priceChange24h', 0) or 0)
+
+        # Volume String Formatting
         if vol >= 1000000: vol_str = f"${vol/1000000:.1f}M"
         elif vol >= 1000: vol_str = f"${vol/1000:.0f}K"
         else: vol_str = f"${vol:.0f}"
@@ -445,20 +453,27 @@ def process_polymarket_event(event):
             for i, out in enumerate(outcomes):
                 if i < len(prices):
                     try:
-                        prob = float(prices[i]) * 100
-                        outcome_data.append((str(out), prob))
+                        # Price is usually 0.72 in API, convert to percentage for list, keep decimal for context
+                        raw_price = float(prices[i]) 
+                        prob_percent = raw_price * 100
+                        outcome_data.append((str(out), prob_percent, raw_price))
                     except: continue
         
         if not outcome_data: return None
 
-        # Sort by Probability
+        # Sort by Probability (High to Low)
         outcome_data.sort(key=lambda x: x[1], reverse=True)
-        top_odds = [f"{o}: {p:.1f}%" for o, p in outcome_data[:3]]
+        
+        # Get Top Probability (0.0 - 1.0 format) for the Generator
+        top_prob_decimal = outcome_data[0][2] 
+        
+        # Format Top 3 Odds for Display
+        top_odds = [f"{o}: {p:.1f}%" for o, p, r in outcome_data[:3]]
         odds_str = " | ".join(top_odds)
 
-        # 5. Extract Details for All Sub-Markets (For Detail View)
+        # 5. Extract Details for All Sub-Markets
         all_sub_markets = []
-        for sub_m in markets_list[:5]: # Cap at 5 sub-markets
+        for sub_m in markets_list[:5]:
             try:
                 sub_out = json.loads(sub_m.get('outcomes')) if isinstance(sub_m.get('outcomes'), str) else sub_m.get('outcomes')
                 sub_pri = json.loads(sub_m.get('outcomePrices')) if isinstance(sub_m.get('outcomePrices'), str) else sub_m.get('outcomePrices')
@@ -486,14 +501,20 @@ def process_polymarket_event(event):
                 all_sub_markets.append(sub_data)
             except: continue
 
+        # Return standardized dict matching generate_market_context requirements
         return {
             "title": title,
             "slug": event.get('slug', ''),
             "volume": vol,
-            "vol_str": vol_str,
+            "vol_str": vol_str, # This is the formatted string (e.g. $50M)
             "odds": odds_str,
             "url": f"https://polymarket.com/event/{event.get('slug', '')}",
-            "markets": all_sub_markets
+            "markets": all_sub_markets,
+            
+            # Fields specifically for generate_market_context:
+            "probability": top_prob_decimal, # 0.72
+            "liquidity": liquidity,          # 150000.0
+            "change_24h": change_24h         # 0.05
         }
     except: return None
 
@@ -572,7 +593,7 @@ def search_market_data_list(user_query):
     except: pass
     return candidates # Return all found
 
-# --- 🔥 D. AGENT LOGIC ---
+# --- 🔥 D. AGENT LOGIC (INTEGRATED) ---
 def generate_keywords(user_text):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -584,38 +605,73 @@ def generate_keywords(user_text):
 def is_chinese_input(text):
     return bool(re.search(r'[\u4e00-\u9fff]', text))
 
+def generate_market_context(market_data, is_cn=True):
+    """
+    根据Polymarket数据，生成增强版的市场背景解读。
+    """
+    if not market_data:
+        # Fallback if no market data is selected
+        if is_cn:
+            return "❌ **无直接预测市场数据**。"
+        else:
+            return "❌ **NO DIRECT MARKET DATA**."
+
+    # 假设 market_data 包含字段：title, probability, volume, liquidity, change_24h, url
+    title = market_data.get('title', 'N/A')
+    prob = market_data.get('probability', 0)  # 例如：0.72 表示72%
+    # 这里我们传入 vol_str ($50M) 以保证显示美观
+    volume = market_data.get('vol_str', 'N/A') 
+    liquidity = market_data.get('liquidity', 0)
+    change_24h = market_data.get('change_24h', 0)  # 例如：0.05 表示概率上升5个百分点
+    url = market_data.get('url', '#')
+    
+    # 动态判断文本
+    trend_text = "上涨" if change_24h > 0 else "下跌" if change_24h < 0 else "持平"
+    trend_text_en = "up" if change_24h > 0 else "down" if change_24h < 0 else "flat"
+    
+    confidence_text = "高" if liquidity > 100000 else "中等" if liquidity > 10000 else "较低"  # 假设流动性阈值
+    confidence_text_en = "High" if liquidity > 100000 else "Medium" if liquidity > 10000 else "Low"
+
+    if is_cn:
+        market_context = f"""
+### ✅ 市场真实资金共识（来自Polymarket）
+
+**📊 核心指标速览**
+* **预测问题：** [{title}]({url})
+* **当前隐含概率：** **{prob:.0%}** （较24小时前 **{trend_text} {abs(change_24h):.1%}**）
+* **市场流动性：** ${liquidity:,.0f} （共识置信度：**{confidence_text}**）
+* **近期交易量：** {volume}
+
+**💡 你的新闻共识探测器解读**
+1. **市场定价 vs. 新闻情绪**：当前市场认为此事发生的可能性为 **{prob:.0%}**。如果你的新闻源显得更乐观或更悲观，就存在值得探究的“预期差”。
+2. **共识强度与趋势**：市场信心正在 **{trend_text}**，且流动性水平表明该共识的可靠性 **{confidence_text}**。
+3. **使用建议**：可将此 **{prob:.0%}** 的概率作为你判断该新闻可信度的**中性基准**。若新闻观点与此概率偏离极大，请务必警惕并寻找更多佐证。
+"""
+    else:
+        market_context = f"""
+### ✅ Real-Money Market Consensus (via Polymarket)
+
+**📊 Key Metrics**
+* **Market:** [{title}]({url})
+* **Implied Probability:** **{prob:.0%}** ({trend_text_en} {abs(change_24h):.1%} in 24h)
+* **Market Liquidity:** ${liquidity:,.0f} (Confidence: **{confidence_text_en}**)
+* **Recent Volume:** {volume}
+
+**💡 Your Consensus Detector's Take**
+1. **Market vs. News Hype:** The market prices a **{prob:.0%}** chance. Any significant deviation in your news source suggests a **mispricing** to investigate.
+2. **Strength & Trend:** Consensus is **{trend_text_en}**, with **{confidence_text_en}** reliability due to liquidity.
+3. **How to Use This:** Treat **{prob:.0%}** as your **neutral baseline** for credibility. Be skeptical if news narratives deviate wildly from this anchor.
+"""
+    return market_context
+
 def get_agent_response(history, market_data):
     model = genai.GenerativeModel('gemini-2.5-flash')
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     first_query = history[0]['content'] if history else ""
     is_cn = is_chinese_input(first_query)
     
-    # 1. Market Context
-    if market_data:
-        odds_info = market_data['odds']
-        if is_cn:
-            market_context = f"""
-            ✅ **[真实资金定价] Polymarket 数据**
-            - **问题:** {market_data['title']}
-            - **当前赔率 (Top 3):** {odds_info}
-            - **资金量:** {market_data['volume']}
-            
-            **指令:** 市场赔率是“聪明的钱”打出的共识。如果新闻情绪与赔率不符（例如新闻说‘大概率发生’但赔率只有20%），则存在【预期差交易机会】。
-            """
-        else:
-            market_context = f"""
-            ✅ **[MARKET PRICING] Polymarket Data**
-            - **Market:** {market_data['title']}
-            - **Top 3 Odds:** {odds_info}
-            - **Volume:** {market_data['volume']}
-            
-            **INSTRUCTION:** Odds represent "Smart Money". If news hype disagrees with odds, identify the **Mispricing**.
-            """
-    else:
-        if is_cn:
-            market_context = "❌ **无直接预测市场数据**。"
-        else:
-            market_context = "❌ **NO DIRECT MARKET DATA**."
+    # 1. Market Context (Using NEW Logic)
+    market_context = generate_market_context(market_data, is_cn)
 
     # 2. System Prompt (PM Mode)
     if is_cn:
@@ -642,7 +698,6 @@ def get_agent_response(history, market_data):
         * **预期差**: 你的差异化观点是什么？
         * **其他市场信号**: 如有，补充其他相关市场数据（例如，相关公司的股价、搜索指数等）。
         
-        
         ### 2. 多角度分析 (Multi-perspective Analysis)
         * **支持方观点**: 列出支持事件发生的理由和主要支持者。
         * **反对方观点**: 列出反对事件发生的理由和主要反对者。
@@ -650,8 +705,8 @@ def get_agent_response(history, market_data):
 
         ### 3. 事实核查与验证 (Fact Check & Verification)
         * **信息来源可靠性***: 评估新闻来源的可信度。
-        * **相关证据***: 列出已知事实或证据，支持或反驳该新闻。
-        * **专家观点***: 如有，汇总专家意见。
+        * **相关证据**: 列出已知事实或证据，支持或反驳该新闻。
+        * **专家观点**: 如有，汇总专家意见。
         
         ### 4. 影响分析 (Impact Analysis)
         * **如果发生**:事件发生会带来哪些影响？（对行业、市场、社会等） -> 资产影响。
@@ -694,7 +749,6 @@ def get_agent_response(history, market_data):
         * **Current Consensus**: What is currently Price-in by the market? Based on prediction market data, how does the market currently view this event? Is the market sentiment optimistic or pessimistic?
         * **The Gap**: What is your differentiated view?
         * **Other Market Signals**: If any, supplement with other relevant market data (e.g., related company stock prices, search indices, etc.).
-        
         
         ### 2. Multi-perspective Analysis (Multi-perspective Analysis)
         * **Proponent View**: List reasons supporting the event's occurrence and main supporters.
@@ -1034,4 +1088,3 @@ if not st.session_state.messages and st.session_state.search_stage == "input":
             </a>
             """, unsafe_allow_html=True)
     st.markdown("<br><br>", unsafe_allow_html=True)
-
