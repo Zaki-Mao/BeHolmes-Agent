@@ -656,56 +656,74 @@ def search_market_data_list(user_query):
         try:
             exa = Exa(EXA_API_KEY)
             
-            # 🔥 FIX 1: 使用多种搜索策略
+            # 🔥 FIX: 使用多种搜索策略，并增加搜索范围
             search_queries = [
-                f"site:polymarket.com {keywords}",  # 原始关键词
-                f"site:polymarket.com/event {user_query[:100]}",  # 原始新闻内容
-                f"polymarket prediction market {keywords}"  # 更宽泛的搜索
+                # 策略1: 直接站点搜索 + 关键词
+                f"site:polymarket.com {keywords}",
+                # 策略2: 站点搜索 + 原文片段
+                f"site:polymarket.com {user_query[:80]}",
+                # 策略3: 更宽泛的搜索
+                f"polymarket prediction {keywords}",
+                # 策略4: 只搜索event页面
+                f"site:polymarket.com/event {keywords}",
             ]
             
             for search_query in search_queries:
                 try:
-                    search_resp = exa.search(
-                        search_query,
-                        num_results=20,  # 增加结果数量
-                        type="neural",
-                        include_domains=["polymarket.com"],
-                        use_autoprompt=True  # 🔥 FIX 2: 使用autoprompt改善搜索质量
-                    )
-                    
-                    for result in search_resp.results:
-                        # 🔥 FIX 3: 更强大的URL解析
-                        # 支持多种URL格式
-                        patterns = [
-                            r'polymarket\.com/event/([^/?#]+)',
-                            r'polymarket\.com/market/([^/?#]+)',
-                            r'polymarket\.com/([^/?#]+)'
-                        ]
-                        
-                        slug = None
-                        for pattern in patterns:
-                            match = re.search(pattern, result.url)
-                            if match:
-                                slug = match.group(1).split('?')[0]
-                                break
-                        
-                        if slug and slug not in seen_slugs and slug != 'event':
-                            seen_slugs.add(slug)
+                    # 尝试两种搜索类型
+                    for search_type in ["neural", "keyword"]:
+                        try:
+                            search_resp = exa.search(
+                                search_query,
+                                num_results=25,  # 进一步增加结果数量
+                                type=search_type,
+                                include_domains=["polymarket.com"],
+                                use_autoprompt=True if search_type == "neural" else False
+                            )
                             
-                            # 尝试获取市场数据
-                            try:
-                                api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
-                                data = requests.get(api_url, timeout=5).json()
+                            for result in search_resp.results:
+                                # 🔥 FIX: 更强大的URL解析，支持更多格式
+                                patterns = [
+                                    r'polymarket\.com/event/([^/?#]+)',
+                                    r'polymarket\.com/market/([^/?#]+)',
+                                    r'polymarket\.com/markets/([^/?#]+)',
+                                    r'polymarket\.com/([a-z0-9\-]+)/?$'  # 匹配根路径后的slug
+                                ]
                                 
-                                if data and isinstance(data, list) and len(data) > 0:
-                                    market_data = process_polymarket_event(data[0])
-                                    if market_data:
-                                        candidates.append(market_data)
-                            except: continue
+                                slug = None
+                                for pattern in patterns:
+                                    match = re.search(pattern, result.url.lower())
+                                    if match:
+                                        raw_slug = match.group(1).split('?')[0].split('#')[0]
+                                        # 过滤掉非slug路径
+                                        if raw_slug not in ['event', 'events', 'market', 'markets', 'about', 'blog']:
+                                            slug = raw_slug
+                                            break
                                 
+                                if slug and slug not in seen_slugs:
+                                    seen_slugs.add(slug)
+                                    
+                                    # 尝试获取市场数据
+                                    try:
+                                        api_url = f"https://gamma-api.polymarket.com/events?slug={slug}"
+                                        api_resp = requests.get(api_url, timeout=5)
+                                        
+                                        if api_resp.status_code == 200:
+                                            data = api_resp.json()
+                                            
+                                            if data and isinstance(data, list) and len(data) > 0:
+                                                market_data = process_polymarket_event(data[0])
+                                                if market_data:
+                                                    candidates.append(market_data)
+                                    except: 
+                                        continue
+                        except: 
+                            continue
+                                    
                 except Exception as e:
                     continue
-        except: pass
+        except: 
+            pass
     
     # --- Engine C: Keyword-based Polymarket Browse (Tertiary) ---
     # 如果前面的方法都失败了，尝试浏览热门市场并进行关键词匹配
@@ -854,11 +872,8 @@ def generate_market_context(market_data, is_cn=True):
     return market_context
 
 def get_agent_response(history, market_data):
-    # 🔥 使用支持Google Search的模型
-    model = genai.GenerativeModel(
-        'gemini-2.5-flash',
-        tools='google_search_retrieval'  # 启用Google搜索功能
-    )
+    # 使用标准Gemini模型
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     first_query = history[0]['content'] if history else ""
@@ -885,7 +900,7 @@ def get_agent_response(history, market_data):
         2. **逻辑自洽:** 严禁逻辑断层。
         3. **强制链接:** 提到标的时必须加链接 (如 [NVDA](https://finance.yahoo.com/quote/NVDA))。
         4. **语言强制:** **必须全程使用中文回答**。
-        5. **事实核查:** 使用Google Search工具验证新闻真实性，引用权威来源。如果搜索结果与新闻内容矛盾，必须明确指出。
+        5. **事实核查:** 基于上方提供的全网事实核查结果进行分析。如果核查结果显示新闻可疑或无法验证，必须在分析中明确指出风险。
 
         {combined_context}
         
@@ -938,7 +953,7 @@ def get_agent_response(history, market_data):
         2. **LOGIC:** Maintain strict logical consistency.
         3. **LINKS:** Link all tickers (e.g. [AAPL](https://finance.yahoo.com/quote/AAPL)).
         4. **LANGUAGE:** English Only.
-        5. **FACT CHECK:** Use Google Search to verify news authenticity, cite authoritative sources. If search results contradict the news, explicitly point it out.
+        5. **FACT CHECK:** Base your analysis on the fact-checking results provided above. If results show the news is suspicious or unverifiable, clearly highlight the risks in your analysis.
 
         {combined_context}
         
@@ -988,7 +1003,7 @@ def get_agent_response(history, market_data):
         api_messages.append({"role": role, "parts": [msg['content']]})
         
     try:
-        # 🔥 启用动态搜索 - Gemini会自动决定何时使用Google Search
+        # 标准生成，Gemini会根据prompt指令自行判断是否需要额外信息
         response = model.generate_content(
             api_messages,
             generation_config=genai.types.GenerationConfig(
@@ -1034,7 +1049,22 @@ with s_mid:
     # === Step 2: SELECTION List ===
     elif st.session_state.search_stage == "selection":
         st.markdown("##### 🧐 Select a Market to Reality Check:")
-        if st.session_state.search_candidates:
+        
+        # 🔥 FIX: 如果没找到市场，优先显示"直接分析"按钮
+        if not st.session_state.search_candidates:
+            st.warning("⚠️ No direct prediction markets found for this news.")
+            st.markdown("---")
+            if st.button("📝 Analyze News Only (AI Analysis)", use_container_width=True, type="primary"):
+                st.session_state.current_market = None
+                st.session_state.search_stage = "analysis"
+                st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
+                st.rerun()
+            
+            if st.button("⬅️ Start Over"):
+                st.session_state.search_stage = "input"
+                st.rerun()
+        else:
+            # 有市场时，先显示市场列表
             for idx, m in enumerate(st.session_state.search_candidates):
                 # Native Container with Styling
                 with st.container():
@@ -1054,19 +1084,17 @@ with s_mid:
                         st.session_state.search_stage = "analysis"
                         st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
                         st.rerun()
-        else:
-            st.warning("No direct markets found.")
 
-        st.markdown("---")
-        if st.button("📝 Analyze News Only (No Market)", use_container_width=True):
-            st.session_state.current_market = None
-            st.session_state.search_stage = "analysis"
-            st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
-            st.rerun()
-            
-        if st.button("⬅️ Start Over"):
-            st.session_state.search_stage = "input"
-            st.rerun()
+            st.markdown("---")
+            if st.button("📝 Analyze News Only (No Market)", use_container_width=True):
+                st.session_state.current_market = None
+                st.session_state.search_stage = "analysis"
+                st.session_state.messages = [{"role": "user", "content": f"Analyze this news: {st.session_state.user_news_text}"}]
+                st.rerun()
+                
+            if st.button("⬅️ Start Over"):
+                st.session_state.search_stage = "input"
+                st.rerun()
 
     # === Step 3: ANALYSIS Execution (Initial Run) ===
     elif st.session_state.search_stage == "analysis":
